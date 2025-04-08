@@ -35,7 +35,7 @@ async function fetchTenantsFromUrl() {
 
     const tenants = await response.json()
     if (!Array.isArray(tenants)) {
-      throw new Error('TENANTS_URL response must be an array')
+      throw new Error('TENANTS_API_URL response must be an array')
     }
 
     const validTenants = []
