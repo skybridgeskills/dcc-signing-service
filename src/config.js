@@ -87,7 +87,7 @@ async function parseTenantSeeds() {
     return // Skip the environment variable processing if tenants were loaded from URL
   }
 
-  // If TENANTS_URL is not set or failed, continue with default and environment variable processing
+  // If TENANTS_API_URL is not set or failed, continue with default and environment variable processing
   // add in the default test key now, so it can be overridden by env
   DID_SEEDS[TEST_TENANT_NAME] = {
     didSeed: await decodeSeed(testSeed),
