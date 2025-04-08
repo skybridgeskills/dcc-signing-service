@@ -62,7 +62,7 @@ async function fetchTenantsFromUrl() {
 
     return validTenants
   } catch (error) {
-    console.error('Error fetching tenants from TENANTS_URL:', error)
+    console.error('Error fetching tenants from TENANTS_API_URL:', error)
     return null
   }
 }
