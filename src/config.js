@@ -12,11 +12,82 @@ export const SECOND_TEST_TENANT_NAME = 'test'
 const randomTenantName = 'random'
 let DID_SEEDS = {}
 
+async function fetchTenantsFromUrl() {
+  if (!process.env.TENANTS_API_URL) {
+    return null
+  }
+
+  try {
+    const headers = {}
+    if (process.env.TENANTS_API_TOKEN) {
+      headers.Authorization = `Bearer ${process.env.TENANTS_API_TOKEN}`
+    } else {
+      console.error('Missing TENANTS_API_TOKEN')
+      return null
+    }
+
+    const response = await fetch(process.env.TENANTS_API_URL, { headers })
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch tenants: ${response.status} ${response.statusText}`
+      )
+    }
+
+    const tenants = await response.json()
+    if (!Array.isArray(tenants)) {
+      throw new Error('TENANTS_URL response must be an array')
+    }
+
+    const validTenants = []
+    for (const tenant of tenants) {
+      if (!tenant.name) {
+        console.warn('Skipping tenant without name property')
+        continue
+      }
+
+      if (!tenant.didSeed) {
+        console.warn(`Skipping tenant ${tenant.name} without didSeed property`)
+        continue
+      }
+
+      if (tenant.didMethod?.toLowerCase() === 'web' && !tenant.didUrl) {
+        console.warn(
+          `Skipping tenant ${tenant.name} with web method but missing didUrl`
+        )
+        continue
+      }
+
+      validTenants.push(tenant)
+    }
+
+    return validTenants
+  } catch (error) {
+    console.error('Error fetching tenants from TENANTS_URL:', error)
+    return null
+  }
+}
+
 export function setConfig() {
   CONFIG = parseConfig()
 }
 
 async function parseTenantSeeds() {
+  const tenants = await fetchTenantsFromUrl()
+  if (tenants && tenants.length > 0) {
+    for (const tenant of tenants) {
+      DID_SEEDS[tenant.name] = {
+        didSeed: await decodeSeed(tenant.didSeed),
+        didMethod:
+          tenant.didMethod && tenant.didMethod.toLowerCase() === 'web'
+            ? 'web'
+            : 'key',
+        didUrl: tenant.didUrl || undefined
+      }
+    }
+    return // Skip the environment variable processing if tenants were loaded from URL
+  }
+
+  // If TENANTS_URL is not set or failed, continue with default and environment variable processing
   // add in the default test key now, so it can be overridden by env
   DID_SEEDS[TEST_TENANT_NAME] = {
     didSeed: await decodeSeed(testSeed),
@@ -63,7 +134,9 @@ function parseConfig() {
       env.CONSOLE_LOG_LEVEL?.toLocaleLowerCase() || defaultConsoleLogLevel,
     logLevel: env.LOG_LEVEL?.toLocaleLowerCase() || defaultLogLevel,
     errorLogFile: env.ERROR_LOG_FILE,
-    logAllFile: env.LOG_ALL_FILE
+    logAllFile: env.LOG_ALL_FILE,
+    tenantsUrl: env.TENANTS_API_URL,
+    tenantsUrlToken: env.TENANTS_API_TOKEN
   })
   return config
 }
@@ -89,11 +162,7 @@ export async function getTenantSeed(tenantName) {
   if (!Object.keys(DID_SEEDS).length) {
     await parseTenantSeeds()
   }
-  if (Object.prototype.hasOwnProperty.call(DID_SEEDS, tenantName)) {
-    return DID_SEEDS[tenantName]
-  } else {
-    return null
-  }
+  return DID_SEEDS[tenantName] ?? null
 }
 
 /*
