@@ -16,6 +16,7 @@ async function fetchTenantsFromUrl() {
   if (!process.env.TENANTS_API_URL) {
     return null
   }
+  console.log('attempting to get tenants from api')
 
   try {
     const headers = {}
@@ -50,13 +51,6 @@ async function fetchTenantsFromUrl() {
         continue
       }
 
-      if (tenant.didMethod?.toLowerCase() === 'web' && !tenant.didUrl) {
-        console.warn(
-          `Skipping tenant ${tenant.name} with web method but missing didUrl`
-        )
-        continue
-      }
-
       validTenants.push(tenant)
     }
 
@@ -71,18 +65,24 @@ export function setConfig() {
   CONFIG = parseConfig()
 }
 
-async function parseTenantSeeds() {
+export async function parseTenantSeeds() {
   const tenants = await fetchTenantsFromUrl()
   if (tenants && tenants.length > 0) {
     for (const tenant of tenants) {
       DID_SEEDS[tenant.name] = {
         didSeed: await decodeSeed(tenant.didSeed),
-        didMethod:
-          tenant.didMethod && tenant.didMethod.toLowerCase() === 'web'
-            ? 'web'
-            : 'key',
-        didUrl: tenant.didUrl || undefined
+        didMethod: 'key'
       }
+    }
+    // add in the default test key now, so it can be overridden by env
+    DID_SEEDS[TEST_TENANT_NAME] = {
+      didSeed: await decodeSeed(testSeed),
+      didMethod: 'key'
+    }
+    // and again with a different tenant name
+    DID_SEEDS[SECOND_TEST_TENANT_NAME] = {
+      didSeed: await decodeSeed(testSeed),
+      didMethod: 'key'
     }
     return // Skip the environment variable processing if tenants were loaded from URL
   }
