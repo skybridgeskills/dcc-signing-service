@@ -65,7 +65,7 @@ export function setConfig() {
   CONFIG = parseConfig()
 }
 
-export async function parseTenantSeeds() {
+export async function fetchAndUpdateTenantSeeds() {
   const tenants = await fetchTenantsFromUrl()
   if (tenants && tenants.length > 0) {
     for (const tenant of tenants) {
@@ -160,7 +160,7 @@ export async function deleteSeed(tenantName) {
 
 export async function getTenantSeed(tenantName) {
   if (!Object.keys(DID_SEEDS).length) {
-    await parseTenantSeeds()
+    await fetchAndUpdateTenantSeeds()
   }
   return DID_SEEDS[tenantName] ?? null
 }
