@@ -1,5 +1,9 @@
 import { generateSecretKeySeed } from 'bnid'
-
+import {
+  SecretsManagerClient,
+  GetSecretValueCommand,
+  ListSecretsCommand
+} from '@aws-sdk/client-secrets-manager'
 import decodeSeed from './utils/decodeSeed.js'
 
 let CONFIG
@@ -12,51 +16,78 @@ export const SECOND_TEST_TENANT_NAME = 'test'
 const randomTenantName = 'random'
 let DID_SEEDS = {}
 
-async function fetchTenantsFromUrl() {
-  if (!process.env.TENANTS_API_URL) {
+async function getTenantsFromAwsSecretsManager() {
+  if (!process.env.TENANTS_AWS_SECRETS) {
     return null
   }
-  console.log('attempting to get tenants from api')
+  console.log('Attempting to get tenants from AWS Secrets Manager')
 
   try {
-    const headers = {}
-    if (process.env.TENANTS_API_TOKEN) {
-      headers.Authorization = `Bearer ${process.env.TENANTS_API_TOKEN}`
-    } else {
-      console.error('Missing TENANTS_API_TOKEN')
+    const client = new SecretsManagerClient({
+      region: process.env.AWS_REGION || 'us-west-2'
+    })
+
+    // List all secrets with the tenant/ prefix
+    const listCommand = new ListSecretsCommand({
+      Filters: [
+        {
+          Key: 'name',
+          Values: ['tenant/']
+        }
+      ]
+    })
+
+    const listResponse = await client.send(listCommand)
+    if (!listResponse.SecretList || listResponse.SecretList.length === 0) {
+      console.log('No tenant secrets found in AWS Secrets Manager')
       return null
     }
 
-    const response = await fetch(process.env.TENANTS_API_URL, { headers })
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch tenants: ${response.status} ${response.statusText}`
-      )
-    }
-
-    const tenants = await response.json()
-    if (!Array.isArray(tenants)) {
-      throw new Error('TENANTS_API_URL response must be an array')
-    }
-
     const validTenants = []
-    for (const tenant of tenants) {
-      if (!tenant.name) {
-        console.warn('Skipping tenant without name property')
+
+    // Process each tenant secret
+    for (const secret of listResponse.SecretList) {
+      const secretName = secret.Name
+
+      // Extract tenant name from the secret name (e.g., "tenant/mcdonalds.com/credentials" -> "mcdonalds.com")
+      const tenantNameMatch = secretName.match(/^tenant\/([^/]+)\/credentials$/)
+      if (!tenantNameMatch) {
+        console.warn(`Skipping secret with invalid format: ${secretName}`)
         continue
       }
 
-      if (!tenant.didSeed) {
-        console.warn(`Skipping tenant ${tenant.name} without didSeed property`)
+      const tenantName = tenantNameMatch[1]
+
+      // Get the secret value
+      const getCommand = new GetSecretValueCommand({
+        SecretId: secretName
+      })
+
+      const secretResponse = await client.send(getCommand)
+      if (!secretResponse.SecretString) {
+        console.warn(`No secret string found for ${secretName}`)
         continue
       }
 
-      validTenants.push(tenant)
+      const secretData = JSON.parse(secretResponse.SecretString)
+
+      // Check if the secret has the required fields
+      if (!secretData.seed) {
+        console.warn(`Skipping tenant ${tenantName} without seed property`)
+        continue
+      }
+
+      // Add the tenant to the valid tenants list
+      validTenants.push({
+        name: tenantName,
+        didSeed: secretData.seed,
+        didMethod: 'key' // Default to 'key' method
+      })
     }
 
     return validTenants
   } catch (error) {
-    console.error('Error fetching tenants from TENANTS_API_URL:', error)
+    console.error('Error fetching tenants from AWS Secrets Manager:', error)
     return null
   }
 }
@@ -66,7 +97,7 @@ export function setConfig() {
 }
 
 export async function fetchAndUpdateTenantSeeds() {
-  const tenants = await fetchTenantsFromUrl()
+  const tenants = await getTenantsFromAwsSecretsManager()
   if (tenants && tenants.length > 0) {
     for (const tenant of tenants) {
       DID_SEEDS[tenant.name] = {
@@ -134,9 +165,7 @@ function parseConfig() {
       env.CONSOLE_LOG_LEVEL?.toLocaleLowerCase() || defaultConsoleLogLevel,
     logLevel: env.LOG_LEVEL?.toLocaleLowerCase() || defaultLogLevel,
     errorLogFile: env.ERROR_LOG_FILE,
-    logAllFile: env.LOG_ALL_FILE,
-    tenantsUrl: env.TENANTS_API_URL,
-    tenantsUrlToken: env.TENANTS_API_TOKEN
+    logAllFile: env.LOG_ALL_FILE
   })
   return config
 }
