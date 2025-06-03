@@ -27,26 +27,31 @@ async function getTenantsFromAwsSecretsManager() {
       region: process.env.AWS_REGION || 'us-west-2'
     })
 
-    // List all secrets with the tenant/ prefix
-    const listCommand = new ListSecretsCommand({
-      Filters: [
-        {
-          Key: 'name',
-          Values: ['tenant/']
-        }
-      ]
-    })
+    // List all secrets with the specified prefix
+    let NextToken = 'INITIAL'
+    let SecretList = []
 
-    const listResponse = await client.send(listCommand)
-    if (!listResponse.SecretList || listResponse.SecretList.length === 0) {
-      console.log('No tenant secrets found in AWS Secrets Manager')
-      return null
+    while (NextToken) {
+      NextToken = NextToken === 'INITIAL' ? undefined : NextToken
+      const listCommand = new ListSecretsCommand({
+        Filters: [
+          {
+            Key: 'name',
+            Values: ['tenant']
+          }
+        ],
+        MaxResults: 100,
+        NextToken
+      })
+      const result = await client.send(listCommand)
+      NextToken = result.NextToken
+      SecretList = [...SecretList, ...(result.SecretList || [])]
     }
 
     const validTenants = []
 
     // Process each tenant secret
-    for (const secret of listResponse.SecretList) {
+    for (const secret of SecretList) {
       const secretName = secret.Name
 
       // Extract tenant name from the secret name (e.g., "tenant/mcdonalds.com/credentials" -> "mcdonalds.com")
