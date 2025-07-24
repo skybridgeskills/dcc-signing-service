@@ -1,10 +1,6 @@
 import { generateSecretKeySeed } from 'bnid'
-import {
-  SecretsManagerClient,
-  GetSecretValueCommand,
-  ListSecretsCommand
-} from '@aws-sdk/client-secrets-manager'
 import decodeSeed from './utils/decodeSeed.js'
+import { allTenants } from '../redis.js'
 
 let CONFIG
 const defaultPort = 4006
@@ -16,93 +12,12 @@ export const SECOND_TEST_TENANT_NAME = 'test'
 const randomTenantName = 'random'
 let DID_SEEDS = {}
 
-async function getTenantsFromAwsSecretsManager() {
-  if (!process.env.TENANTS_AWS_SECRETS) {
-    return null
-  }
-  console.log('Attempting to get tenants from AWS Secrets Manager')
-
-  try {
-    const client = new SecretsManagerClient({
-      region: process.env.AWS_REGION || 'us-west-2'
-    })
-
-    // List all secrets with the specified prefix
-    let NextToken = 'INITIAL'
-    let SecretList = []
-
-    while (NextToken) {
-      NextToken = NextToken === 'INITIAL' ? undefined : NextToken
-      const listCommand = new ListSecretsCommand({
-        Filters: [
-          {
-            Key: 'name',
-            Values: ['tenant']
-          }
-        ],
-        MaxResults: 100,
-        NextToken
-      })
-      const result = await client.send(listCommand)
-      NextToken = result.NextToken
-      SecretList = [...SecretList, ...(result.SecretList || [])]
-    }
-
-    const validTenants = []
-
-    // Process each tenant secret
-    for (const secret of SecretList) {
-      const secretName = secret.Name
-
-      // Extract tenant name from the secret name (e.g., "tenant/mcdonalds.com/credentials" -> "mcdonalds.com")
-      const tenantNameMatch = secretName.match(/^tenant\/([^/]+)\/credentials$/)
-      if (!tenantNameMatch) {
-        console.warn(`Skipping secret with invalid format: ${secretName}`)
-        continue
-      }
-
-      const tenantName = tenantNameMatch[1]
-
-      // Get the secret value
-      const getCommand = new GetSecretValueCommand({
-        SecretId: secretName
-      })
-
-      const secretResponse = await client.send(getCommand)
-      if (!secretResponse.SecretString) {
-        console.warn(`No secret string found for ${secretName}`)
-        continue
-      }
-
-      const secretData = JSON.parse(secretResponse.SecretString)
-
-      // Check if the secret has the required fields
-      if (!secretData.seed) {
-        console.warn(`Skipping tenant ${tenantName} without seed property`)
-        continue
-      }
-
-      // Add the tenant to the valid tenants list
-      validTenants.push({
-        name: tenantName,
-        didSeed: secretData.seed,
-        didMethod: 'key' // Default to 'key' method
-      })
-    }
-
-    return validTenants
-  } catch (error) {
-    console.error('Error fetching tenants from AWS Secrets Manager:', error)
-    return null
-  }
-}
-
 export function setConfig() {
   CONFIG = parseConfig()
 }
 
 export async function fetchAndUpdateTenantSeeds() {
-  const tenants = await getTenantsFromAwsSecretsManager()
+  const tenants = await allTenants()
   if (tenants && tenants.length > 0) {
     for (const tenant of tenants) {
       DID_SEEDS[tenant.name] = {

@@ -9,7 +9,7 @@ import errorLogger from './middleware/errorLogger.js'
 import invalidPathHandler from './middleware/invalidPathHandler.js'
 import SigningException from './SigningException.js'
 import { getUnsignedVC } from './test-fixtures/vc.js'
-import { TEST_TENANT_NAME, fetchAndUpdateTenantSeeds } from './config.js'
+import { TEST_TENANT_NAME } from './config.js'
 
 export async function build() {
   var app = express()
@@ -58,12 +58,6 @@ export async function build() {
       // catch the async errors and pass them to the error logger and handler
       next(e)
     }
-  })
-
-  app.get('/refresh-seeds', async (_, res) => {
-    await fetchAndUpdateTenantSeeds()
-    console.log('refreshing...')
-    res.json({ message: 'DID seeds refreshed' })
   })
 
   app.get('/did-key-generator', async (req, res, next) => {
