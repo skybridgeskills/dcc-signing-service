@@ -1,8 +1,11 @@
 import Redis from 'ioredis'
 
-const redis = new Redis(process.env.REDIS_URI ?? 'localhost:6379')
+const redis = process.env.TENANT_SEED_TESTING
+  ? null
+  : new Redis(process.env.REDIS_URI ?? 'localhost:6379')
 
 export async function allTenants() {
+  if (process.env.TENANT_SEED_TESTING) return []
   const keys = await redis.keys('tenantPrivate:*')
   const toTenant = async (key) => {
     const seed = await redis.hget(key, 'seed')

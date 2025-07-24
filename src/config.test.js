@@ -10,32 +10,32 @@ describe('Config', () => {
 
   beforeEach(async () => {
     resetConfig()
-    delete process.env[`TENANT_SEED_${tenantName}`]
-    delete process.env[`TENANT_DIDMETHOD_${tenantName}`]
+    delete process.env[`TENANT_SEED_${tenantName.toUpperCase()}`]
+    delete process.env[`TENANT_DIDMETHOD_${tenantName.toUpperCase()}`]
   })
 
   afterEach(async () => {})
 
   describe('DID Method', () => {
     it('defaults to use DID:key', async () => {
-      process.env[`TENANT_SEED_${tenantName}`] =
+      process.env[`TENANT_SEED_${tenantName.toUpperCase()}`] =
         'z1AeiPT496wWmo9BG2QYXeTusgFSZPNG3T9wNeTtjrQ3rCB'
       const seed = await getTenantSeed('configtest')
       expect(seed.didMethod).to.eql('key')
     })
 
     it('uses DID:key when requested', async () => {
-      process.env[`TENANT_SEED_${tenantName}`] =
+      process.env[`TENANT_SEED_${tenantName.toUpperCase()}`] =
         'z1AeiPT496wWmo9BG2QYXeTusgFSZPNG3T9wNeTtjrQ3rCB'
-      process.env[`TENANT_DIDMETHOD_${tenantName}`] = 'key'
+      process.env[`TENANT_DIDMETHOD_${tenantName.toUpperCase()}`] = 'key'
       const seed = await getTenantSeed('configtest')
       expect(seed.didMethod).to.eql('key')
     })
 
     it('uses DID:web when requested', async () => {
-      process.env[`TENANT_SEED_${tenantName}`] =
+      process.env[`TENANT_SEED_${tenantName.toUpperCase()}`] =
         'z1AeiPT496wWmo9BG2QYXeTusgFSZPNG3T9wNeTtjrQ3rCB'
-      process.env[`TENANT_DIDMETHOD_${tenantName}`] = 'web'
+      process.env[`TENANT_DIDMETHOD_${tenantName.toUpperCase()}`] = 'web'
       const seed = await getTenantSeed('configtest')
       expect(seed.didMethod).to.eql('web')
     })
@@ -43,7 +43,7 @@ describe('Config', () => {
 
   describe('DID Seed', () => {
     it('decodes multibase did seeds', async () => {
-      process.env[`TENANT_SEED_${tenantName}`] =
+      process.env[`TENANT_SEED_${tenantName.toUpperCase()}`] =
         'z1AeiPT496wWmo9BG2QYXeTusgFSZPNG3T9wNeTtjrQ3rCB'
       const seed = await getTenantSeed('configtest')
       expect(seed.didSeed).to.eql(
@@ -56,7 +56,7 @@ describe('Config', () => {
     })
 
     it('decodes non-multibase seeds', async () => {
-      process.env[`TENANT_SEED_${tenantName}`] =
+      process.env[`TENANT_SEED_${tenantName.toUpperCase()}`] =
         'abcdefghijklmnopqrstuvwxyzABCDEFGHIJ'
       const seed = await getTenantSeed('configtest')
       expect(seed.didSeed).to.eql(
