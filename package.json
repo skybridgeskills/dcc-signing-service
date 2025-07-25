@@ -14,7 +14,6 @@
     "test:health": "node -r dotenv/config healthcheck.js dotenv_config_path=./.env.healthcheck.testing "
   },
   "dependencies": {
-    "@aws-sdk/client-secrets-manager": "^3.0.0",
     "@digitalbazaar/cborld": "^7.1.2",
     "@digitalbazaar/did-method-key": "^5.2.0",
     "@digitalbazaar/ed25519-signature-2020": "^5.4.0",
@@ -29,6 +28,7 @@
     "crypto-ld": "^7.0.0",
     "dotenv": "^16.0.3",
     "express": "~4.16.1",
+    "ioredis": "^5.6.1",
     "morgan": "~1.9.1",
     "nodemailer": "^6.9.13",
     "winston": "^3.10.0"

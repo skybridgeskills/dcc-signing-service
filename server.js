@@ -5,7 +5,7 @@ import http from 'http'
 import fs from 'fs'
 
 const run = async () => {
-  await setConfig()
+  setConfig()
   const { port, enableHttpsForDev } = getConfig()
 
   const app = await build()
