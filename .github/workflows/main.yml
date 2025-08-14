@@ -40,4 +40,4 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: skybridgeskills/dcc-signing-service:${{ github.sha }}
+          tags: skybridgeskills/dcc-signing-service:latest,skybridgeskills/dcc-signing-service:${{ github.sha }}
