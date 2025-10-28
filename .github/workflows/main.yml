@@ -2,6 +2,10 @@ name: Node.js CI/CD
 
 on: [push]
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   test-node:
     runs-on: ubuntu-latest
@@ -37,7 +41,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::853091924495:role/github/github-assume-role
+          role-to-assume: ${{ vars.ECR_ROLE_ARN }}
           aws-region: us-west-2
 
       - name: Login to Amazon ECR
