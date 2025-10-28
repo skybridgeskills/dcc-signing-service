@@ -27,17 +27,49 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Log in to Docker Hub
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: skybridgeskills
           password: ${{ secrets.DOCKERHUB_PAT }}
+
+      - name: Extract version from package.json
+        id: version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "short_sha=${GITHUB_SHA:0:7}" >> $GITHUB_OUTPUT
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: skybridgeskills/dcc-signing-service:latest,skybridgeskills/dcc-signing-service:${{ github.sha }}
+          tags: |
+            853091924495.dkr.ecr.us-west-2.amazonaws.com/dcc-signing-service:${{ steps.version.outputs.version }}
+            853091924495.dkr.ecr.us-west-2.amazonaws.com/dcc-signing-service:${{ steps.version.outputs.short_sha }}
+            853091924495.dkr.ecr.us-west-2.amazonaws.com/dcc-signing-service:latest
+            skybridgeskills/dcc-signing-service:${{ steps.version.outputs.version }}
+            skybridgeskills/dcc-signing-service:${{ steps.version.outputs.short_sha }}
+            skybridgeskills/dcc-signing-service:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
