@@ -64,9 +64,16 @@ async function getTenantsFromAwsSecretsManager() {
       const tenantName = tenantNameMatch[1]
 
       // Get the secret value
-      const getCommand = new GetSecretValueCommand({
+      const getCommandOptions = {
         SecretId: secretName
-      })
+      }
+
+      // Use KMS key if provided
+      if (process.env.KMS_KEY_ID) {
+        getCommandOptions.KmsKeyId = process.env.KMS_KEY_ID
+      }
+
+      const getCommand = new GetSecretValueCommand(getCommandOptions)
 
       const secretResponse = await client.send(getCommand)
       if (!secretResponse.SecretString) {
