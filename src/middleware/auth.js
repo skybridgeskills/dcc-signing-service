@@ -40,6 +40,18 @@ export async function authenticateBearerToken(req, res, next) {
   const instanceId = req.params.instanceId
   const authHeader = req.headers.authorization
 
+  const tenantConfig = await getTenantSeed(instanceId)
+
+  if (!tenantConfig) {
+    return next(new SigningException(404, "Tenant doesn't exist."))
+  }
+
+  // If no auth token is configured for the tenant, skip authentication entirely
+  if (!tenantConfig.authToken) {
+    return next()
+  }
+
+  // Tenant has auth token configured, so require authentication
   if (!authHeader) {
     return next(new SigningException(401, 'Authorization header required'))
   }
@@ -65,17 +77,6 @@ export async function authenticateBearerToken(req, res, next) {
       return next(new SigningException(401, 'Invalid username'))
     }
 
-    const tenantConfig = await getTenantSeed(instanceId)
-
-    if (!tenantConfig) {
-      return next(new SigningException(404, "Tenant doesn't exist."))
-    }
-
-    // If no auth token is configured for the tenant, skip authentication
-    if (!tenantConfig.authToken) {
-      return next()
-    }
-
     if (credentials.password !== tenantConfig.authToken) {
       return next(new SigningException(401, 'Invalid password'))
     }
@@ -91,17 +92,6 @@ export async function authenticateBearerToken(req, res, next) {
       return next(
         new SigningException(401, 'Invalid Bearer format. Use: Bearer <token>')
       )
-    }
-
-    const tenantConfig = await getTenantSeed(instanceId)
-
-    if (!tenantConfig) {
-      return next(new SigningException(404, "Tenant doesn't exist."))
-    }
-
-    // If no auth token is configured for the tenant, skip authentication
-    if (!tenantConfig.authToken) {
-      return next()
     }
 
     if (token !== tenantConfig.authToken) {

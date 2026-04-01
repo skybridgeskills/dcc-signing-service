@@ -169,6 +169,116 @@ describe('api', () => {
     })
   })
 
+  describe('POST /instance/:instanceId/credentials/issue (VCALM)', () => {
+    const testToken = 'testsecret123'
+    const authedTenant = 'authedtest'
+
+    beforeEach(() => {
+      resetConfig()
+      process.env[`TENANT_SEED_${authedTenant}`] =
+        'z1AeiPT496wWmo9BG2QYXeTusgFSZPNG3T9wNeTtjrQ3rCB'
+      process.env[`TENANT_AUTH_TOKEN_${authedTenant}`] = testToken
+      clearIssuerInstances()
+    })
+
+    afterEach(() => {
+      delete process.env[`TENANT_SEED_${authedTenant}`]
+      delete process.env[`TENANT_AUTH_TOKEN_${authedTenant}`]
+    })
+
+    it('returns 401 if no authorization header', async () => {
+      const response = await request(app)
+        .post(`/instance/${authedTenant}/credentials/issue`)
+        .send({ credential: getUnsignedVC() })
+
+      expect(response.status).to.eql(401)
+    })
+
+    it('returns 401 with invalid Bearer token', async () => {
+      const response = await request(app)
+        .post(`/instance/${authedTenant}/credentials/issue`)
+        .set('Authorization', 'Bearer wrongtoken')
+        .send({ credential: getUnsignedVC() })
+
+      expect(response.status).to.eql(401)
+    })
+
+    it('returns 200 with valid Bearer token', async () => {
+      const sentCred = getUnsignedVCWithStatus()
+      const response = await request(app)
+        .post(`/instance/${authedTenant}/credentials/issue`)
+        .set('Authorization', `Bearer ${testToken}`)
+        .send({ credential: sentCred })
+
+      expect(response.header['content-type']).to.have.string('json')
+      expect(response.status).to.eql(200)
+      expect(response.body.proof.type).to.eql('Ed25519Signature2020')
+    })
+
+    it('returns 401 with wrong username in Basic Auth', async () => {
+      const credentials = Buffer.from(`wrongtenant:${testToken}`).toString(
+        'base64'
+      )
+      const response = await request(app)
+        .post(`/instance/${authedTenant}/credentials/issue`)
+        .set('Authorization', `Basic ${credentials}`)
+        .send({ credential: getUnsignedVC() })
+
+      expect(response.status).to.eql(401)
+    })
+
+    it('returns 401 with wrong password in Basic Auth', async () => {
+      const credentials = Buffer.from(`${authedTenant}:wrongpassword`).toString(
+        'base64'
+      )
+      const response = await request(app)
+        .post(`/instance/${authedTenant}/credentials/issue`)
+        .set('Authorization', `Basic ${credentials}`)
+        .send({ credential: getUnsignedVC() })
+
+      expect(response.status).to.eql(401)
+    })
+
+    it('returns 200 with valid Basic Auth', async () => {
+      const sentCred = getUnsignedVCWithStatus()
+      const credentials = Buffer.from(`${authedTenant}:${testToken}`).toString(
+        'base64'
+      )
+      const response = await request(app)
+        .post(`/instance/${authedTenant}/credentials/issue`)
+        .set('Authorization', `Basic ${credentials}`)
+        .send({ credential: sentCred })
+
+      expect(response.header['content-type']).to.have.string('json')
+      expect(response.status).to.eql(200)
+      expect(response.body.proof.type).to.eql('Ed25519Signature2020')
+    })
+
+    it('returns 400 if credential property is missing', async () => {
+      const credentials = Buffer.from(`${authedTenant}:${testToken}`).toString(
+        'base64'
+      )
+      const response = await request(app)
+        .post(`/instance/${authedTenant}/credentials/issue`)
+        .set('Authorization', `Basic ${credentials}`)
+        .send({}) // No credential property
+
+      expect(response.status).to.eql(400)
+    })
+
+    it('works without auth when tenant has no authToken configured', async () => {
+      const noAuthTenant = 'testing' // Default tenant with no auth token
+      const sentCred = getUnsignedVCWithStatus()
+      const response = await request(app)
+        .post(`/instance/${noAuthTenant}/credentials/issue`)
+        .send({ credential: sentCred })
+
+      expect(response.header['content-type']).to.have.string('json')
+      expect(response.status).to.eql(200)
+      expect(response.body.proof.type).to.eql('Ed25519Signature2020')
+    })
+  })
+
   describe('DID:web', () => {
     const tenantName = 'apptest'
 
