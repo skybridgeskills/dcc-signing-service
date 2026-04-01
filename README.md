@@ -39,9 +39,9 @@ Implements five http endpoints:
 
 Which signs and returns a [Verifiable Credential](https://www.w3.org/TR/vc-data-model/) that has been posted to it. This is the legacy endpoint for backwards compatibility.
 
-- POST /instance/:instanceId/credentials/issue
+- POST /credentials/issue
 
-Which is the VCALM-compatible endpoint for issuing credentials. Supports Bearer token and Basic Auth authentication. See the [VCALM Issue Endpoint](#vcalm-issue-endpoint) section.
+Which is the VCALM-compatible endpoint for issuing credentials. The tenant is identified and authenticated via `Authorization` (Basic username = tenant name, or Bearer token from `TENANT_AUTH_TOKEN_{TENANT_NAME}`). See the [VCALM Issue Endpoint](#vcalm-issue-endpoint) section.
 
 - GET /did-key-generator
 
@@ -57,7 +57,7 @@ Which is an endpoint typically meant to be called by the Docker [HEALTHCHECK](ht
 
 The signing endpoint is meant to be called as a RESTful service from any software wanting to sign a credential. It is used, for example, by the [DCC issuer-coordinator](https://github.com/digitalcredentials/issuer-coordinator) and the [DCC workflow-coordinator](https://github.com/digitalcredentials/worfklow-coordinator). See an [example docker-compose configuration](https://github.com/digitalcredentials/workflow-coordinator/blob/main/docker-compose.yml) from the workflow-coordinator repository for an example of how to run this service.
 
-This service supports multiple signing keys ([DIDs](https://www.w3.org/TR/did-core/)), identified by the `:instanceId` in the signing endpoint's path. An `instance` is sometimes also called a `tenant`.
+This service supports multiple signing keys ([DIDs](https://www.w3.org/TR/did-core/)). The legacy sign endpoint identifies the tenant with `:instanceId` in the URL. The VCALM issue endpoint identifies the tenant from the `Authorization` header instead (see [VCALM Issue Endpoint](#vcalm-issue-endpoint)). An `instance` is sometimes also called a `tenant`.
 
 You may also want to take a look at the [DCC issuer-coordinator](https://github.com/digitalcredentials/issuer-coordinator), as it provides bearer token security over tenant endpoints, and combines both signing and status revocation as a single service. It also describes a model for composing DCC services within a Docker Compose network.
 
@@ -95,7 +95,7 @@ There is a sample .env file provided called .env.example to help you get started
 | `TENANT_DIDMETHOD_{TENANT_NAME}`   | did method (`key` or `web`) to use for signing on this tenant                                                       | `key`                      | no       |
 | `TENANT_DID_URL_{TENANT_NAME}`     | url to use for did:web                                                                                              |                            | no       |
 | `TENANT_CRYPTOSUITE_{TENANT_NAME}` | cryptosuite to use (`eddsa-rdfc-2022` for DataIntegrityProof, omit for Ed25519Signature2020)                        | `Ed25519Signature2020`     | no       |
-| `TENANT_AUTH_TOKEN_{TENANT_NAME}`  | Bearer token or Basic Auth password for `/credentials/issue` endpoint - see [VCALM endpoint](#vcalm-issue-endpoint) |                            | no       |
+| `TENANT_AUTH_TOKEN_{TENANT_NAME}`  | Secret for Bearer (`Authorization: Bearer …`) or Basic Auth password on `/credentials/issue`. Each token must be unique if you use Bearer. See [VCALM endpoint](#vcalm-issue-endpoint) |                            | no       |
 | `ENABLE_ACCESS_LOGGING`            | log all http calls to the service - see [Logging](#logging)                                                         | true                       | no       |
 | `ERROR_LOG_FILE`                   | log file for all errors - see [Logging](#logging)                                                                   | no                         | no       |
 | `LOG_ALL_FILE`                     | log file for everything - see [Logging](#logging)                                                                   | no                         | no       |
@@ -126,14 +126,16 @@ TENANT_SEED_DEGREES=z1AoLPRWHSKasPH1unbY1A6ZFF2Pdzzp7D2CkpK6YYYdKTN
 TENANT_SEED_ECON101=Z1genK82erz1AoLPRWHSKZFF2Pdzzp7D2CkpK6YYYdKTNat
 ```
 
-The tenant names can then be specified in the issuing invocation like so:
+For the legacy sign endpoint, tenant names appear in the URL:
 
 ```
-http://myhost.org/instance/degrees/credentials/issue
-http://myhost.org/instance/econ101/credentials/issue
+http://myhost.org/instance/degrees/credentials/sign
+http://myhost.org/instance/econ101/credentials/sign
 ```
 
-Note that the legacy `/credentials/sign` endpoint is unsecured by default. The new `/credentials/issue` endpoint (VCALM-compatible) supports Bearer token and Basic Auth when `TENANT_AUTH_TOKEN_{TENANT_NAME}` is configured. See the [VCALM Issue Endpoint](#vcalm-issue-endpoint) section for details.
+The VCALM `/credentials/issue` path is the same for every tenant: `https://myhost.org/credentials/issue`. Identify the tenant with Basic Auth (`username` = tenant name, e.g. `degrees`) or with Bearer auth and `TENANT_AUTH_TOKEN_{TENANT_NAME}`. See the [VCALM Issue Endpoint](#vcalm-issue-endpoint) section.
+
+Note that the legacy `/credentials/sign` endpoint is unsecured by default. `/credentials/issue` always requires an `Authorization` header.
 
 #### Cryptosuite Configuration
 
@@ -147,11 +149,7 @@ When `eddsa-rdfc-2022` is specified, the service will use the Data Integrity spe
 
 #### Default Tenants
 
-There are three tenants setup by default:
-
-- instance/test/credentials/issue
-- instance/testing/credentials/issue
-- instance/random/credentials/issue
+There are three tenants setup by default (for `/credentials/sign` paths use `instance/{name}/credentials/sign`; for `/credentials/issue` use Basic Auth with username `test`, `testing`, or `random`):
 
 The `test` and `testing` tenants both use this seed and corresponding [DID](https://www.w3.org/TR/did-core/):
 
@@ -523,20 +521,18 @@ NOTE: CURL can get a bit clunky if you want to experiment - you might consider t
 
 The service also supports the VCALM (Verifiable Credentials API for Learner Records Management) `/credentials/issue` endpoint. This endpoint is similar to the `/credentials/sign` endpoint but follows the VCALM specification format and supports authentication.
 
-#### POST /instance/:instanceId/credentials/issue
+#### POST /credentials/issue
 
-This endpoint follows the VCALM specification for issuing credentials. It accepts both Bearer token and Basic Auth authentication methods when `TENANT_AUTH_TOKEN_{TENANT_NAME}` is configured for the tenant.
+This endpoint follows the VCALM specification for issuing credentials. The tenant is **not** in the URL; it is determined from `Authorization`.
 
-**Authentication:**
+**Authentication (required):**
 
-- **Bearer Token**: `Authorization: Bearer <token>` where `<token>` matches the `TENANT_AUTH_TOKEN_{TENANT_NAME}` value
-- **Basic Auth**: `Authorization: Basic <base64(username:password)>` where `username` is the tenant name and `password` matches the `TENANT_AUTH_TOKEN_{TENANT_NAME}` value
-
-If `TENANT_AUTH_TOKEN_{TENANT_NAME}` is not configured for a tenant, the endpoint is accessible without authentication (backwards compatible).
+- **Basic Auth**: `Authorization: Basic <base64(username:password)>` where `username` is the tenant name (same as the legacy path segment, case-insensitive). If `TENANT_AUTH_TOKEN_{TENANT_NAME}` is set, `password` must match it; if not set, any password is accepted once the tenant exists.
+- **Bearer Token**: `Authorization: Bearer <token>` where `<token>` equals that tenant's `TENANT_AUTH_TOKEN_{TENANT_NAME}`. The service maps the token to a tenant internally; **use a distinct token per tenant.**
 
 **Headers:**
 
-- `Authorization: Bearer <token>` OR `Authorization: Basic <base64(username:password)>` (required only if tenant has auth token configured)
+- `Authorization: Bearer <token>` or `Authorization: Basic <base64(username:password)>` (required)
 - `Content-Type: application/json`
 
 **Request Body:**
@@ -555,7 +551,7 @@ If `TENANT_AUTH_TOKEN_{TENANT_NAME}` is not configured for a tenant, the endpoin
 **Example with Bearer Token:**
 
 ```bash
-curl --location 'http://localhost:4006/instance/test/credentials/issue' \
+curl --location 'http://localhost:4006/credentials/issue' \
 --header 'Authorization: Bearer mysecrettoken' \
 --header 'Content-Type: application/json' \
 --data '{
@@ -571,7 +567,7 @@ curl --location 'http://localhost:4006/instance/test/credentials/issue' \
 **Example with Basic Auth:**
 
 ```bash
-curl --location 'http://localhost:4006/instance/test/credentials/issue' \
+curl --location 'http://localhost:4006/credentials/issue' \
 --header 'Authorization: Basic dGVzdDpteXNlY3JldHRva2Vu' \
 --header 'Content-Type: application/json' \
 --data '{

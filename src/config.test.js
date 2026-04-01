@@ -1,5 +1,5 @@
 import { expect } from 'chai'
-import { resetConfig, getTenantSeed } from './config.js'
+import { resetConfig, getTenantSeed, getTenantByToken } from './config.js'
 
 const tenantName = 'configtest'
 
@@ -74,6 +74,15 @@ describe('Config', () => {
       process.env[`TENANT_AUTH_TOKEN_${tenantName}`] = 'mysecrettoken'
       const seed = await getTenantSeed('configtest')
       expect(seed.authToken).to.eql('mysecrettoken')
+    })
+
+    it('maps Bearer token to tenant name after load', async () => {
+      process.env[`TENANT_SEED_${tenantName}`] =
+        'z1AeiPT496wWmo9BG2QYXeTusgFSZPNG3T9wNeTtjrQ3rCB'
+      process.env[`TENANT_AUTH_TOKEN_${tenantName}`] = 'tok-configtest'
+      await getTenantSeed('configtest')
+      expect(getTenantByToken('tok-configtest')).to.eql('configtest')
+      expect(getTenantByToken('unknown')).to.be.null
     })
   })
 

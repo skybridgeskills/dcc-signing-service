@@ -7,7 +7,7 @@ import accessLogger from './middleware/accessLogger.js'
 import errorHandler from './middleware/errorHandler.js'
 import errorLogger from './middleware/errorLogger.js'
 import invalidPathHandler from './middleware/invalidPathHandler.js'
-import { authenticateBearerToken } from './middleware/auth.js'
+import { authenticateAndIdentifyTenant } from './middleware/auth.js'
 import SigningException from './SigningException.js'
 import { getUnsignedVC } from './test-fixtures/vc.js'
 import { TEST_TENANT_NAME, fetchAndUpdateTenantSeeds } from './config.js'
@@ -63,11 +63,11 @@ export async function build() {
 
   // VCALM-compatible issue endpoint with authentication
   app.post(
-    '/instance/:instanceId/credentials/issue',
-    authenticateBearerToken,
+    '/credentials/issue',
+    authenticateAndIdentifyTenant,
     async (req, res, next) => {
       try {
-        const instanceId = req.params.instanceId
+        const instanceId = req.identifiedTenantId
         const { credential } = req.body
 
         if (!credential || !Object.keys(credential).length) {

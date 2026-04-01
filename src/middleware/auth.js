@@ -1,5 +1,9 @@
 import SigningException from '../SigningException.js'
-import { getTenantSeed } from '../config.js'
+import {
+  getTenantSeed,
+  getTenantByToken,
+  ensureTenantSeedsLoaded
+} from '../config.js'
 
 /**
  * Parses Basic Auth credentials from Authorization header.
@@ -29,36 +33,28 @@ function parseBasicAuth(authHeader) {
 }
 
 /**
- * Middleware to authenticate Bearer token or Basic Auth for VCALM endpoint.
- * Validates the Authorization header against the tenant's configured auth token.
+ * Middleware for POST /credentials/issue: identify the tenant from Basic Auth
+ * (username = tenant name) or Bearer token (reverse lookup), then authenticate.
+ *
+ * Tenants without TENANT_AUTH_TOKEN accept Basic Auth with any password once the
+ * tenant name in the username matches; Bearer is only available when a token is
+ * configured (unique per tenant).
  *
  * @param {object} req - Express request object
  * @param {object} res - Express response object
  * @param {function} next - Express next function
  */
-export async function authenticateBearerToken(req, res, next) {
-  const instanceId = req.params.instanceId
+export async function authenticateAndIdentifyTenant(req, res, next) {
+  await ensureTenantSeedsLoaded()
+
   const authHeader = req.headers.authorization
 
-  const tenantConfig = await getTenantSeed(instanceId)
-
-  if (!tenantConfig) {
-    return next(new SigningException(404, "Tenant doesn't exist."))
-  }
-
-  // If no auth token is configured for the tenant, skip authentication entirely
-  if (!tenantConfig.authToken) {
-    return next()
-  }
-
-  // Tenant has auth token configured, so require authentication
   if (!authHeader) {
     return next(new SigningException(401, 'Authorization header required'))
   }
 
   const [scheme] = authHeader.split(' ')
 
-  // Handle Basic Auth
   if (scheme === 'Basic') {
     const credentials = parseBasicAuth(authHeader)
 
@@ -71,20 +67,24 @@ export async function authenticateBearerToken(req, res, next) {
       )
     }
 
-    // For Basic Auth, username should be the tenant name (instanceId)
-    // and password should be the tenant's authToken
-    if (credentials.username !== instanceId) {
-      return next(new SigningException(401, 'Invalid username'))
+    const instanceId = credentials.username.toLowerCase()
+    const tenantConfig = await getTenantSeed(instanceId)
+
+    if (!tenantConfig) {
+      return next(new SigningException(404, "Tenant doesn't exist."))
     }
 
-    if (credentials.password !== tenantConfig.authToken) {
+    if (
+      tenantConfig.authToken &&
+      credentials.password !== tenantConfig.authToken
+    ) {
       return next(new SigningException(401, 'Invalid password'))
     }
 
+    req.identifiedTenantId = instanceId
     return next()
   }
 
-  // Handle Bearer Auth
   if (scheme === 'Bearer') {
     const [, token] = authHeader.split(' ')
 
@@ -94,14 +94,20 @@ export async function authenticateBearerToken(req, res, next) {
       )
     }
 
-    if (token !== tenantConfig.authToken) {
+    const instanceId = getTenantByToken(token)
+    if (!instanceId) {
       return next(new SigningException(401, 'Invalid token'))
     }
 
+    const tenantConfig = await getTenantSeed(instanceId)
+    if (!tenantConfig || tenantConfig.authToken !== token) {
+      return next(new SigningException(401, 'Invalid token'))
+    }
+
+    req.identifiedTenantId = instanceId
     return next()
   }
 
-  // Unknown scheme
   return next(
     new SigningException(
       401,

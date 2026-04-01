@@ -169,9 +169,10 @@ describe('api', () => {
     })
   })
 
-  describe('POST /instance/:instanceId/credentials/issue (VCALM)', () => {
+  describe('POST /credentials/issue (VCALM)', () => {
     const testToken = 'testsecret123'
     const authedTenant = 'authedtest'
+    const issuePath = '/credentials/issue'
 
     beforeEach(() => {
       resetConfig()
@@ -188,7 +189,7 @@ describe('api', () => {
 
     it('returns 401 if no authorization header', async () => {
       const response = await request(app)
-        .post(`/instance/${authedTenant}/credentials/issue`)
+        .post(issuePath)
         .send({ credential: getUnsignedVC() })
 
       expect(response.status).to.eql(401)
@@ -196,7 +197,7 @@ describe('api', () => {
 
     it('returns 401 with invalid Bearer token', async () => {
       const response = await request(app)
-        .post(`/instance/${authedTenant}/credentials/issue`)
+        .post(issuePath)
         .set('Authorization', 'Bearer wrongtoken')
         .send({ credential: getUnsignedVC() })
 
@@ -206,7 +207,7 @@ describe('api', () => {
     it('returns 200 with valid Bearer token', async () => {
       const sentCred = getUnsignedVCWithStatus()
       const response = await request(app)
-        .post(`/instance/${authedTenant}/credentials/issue`)
+        .post(issuePath)
         .set('Authorization', `Bearer ${testToken}`)
         .send({ credential: sentCred })
 
@@ -215,16 +216,16 @@ describe('api', () => {
       expect(response.body.proof.type).to.eql('Ed25519Signature2020')
     })
 
-    it('returns 401 with wrong username in Basic Auth', async () => {
+    it('returns 404 when Basic username is an unknown tenant', async () => {
       const credentials = Buffer.from(`wrongtenant:${testToken}`).toString(
         'base64'
       )
       const response = await request(app)
-        .post(`/instance/${authedTenant}/credentials/issue`)
+        .post(issuePath)
         .set('Authorization', `Basic ${credentials}`)
         .send({ credential: getUnsignedVC() })
 
-      expect(response.status).to.eql(401)
+      expect(response.status).to.eql(404)
     })
 
     it('returns 401 with wrong password in Basic Auth', async () => {
@@ -232,7 +233,7 @@ describe('api', () => {
         'base64'
       )
       const response = await request(app)
-        .post(`/instance/${authedTenant}/credentials/issue`)
+        .post(issuePath)
         .set('Authorization', `Basic ${credentials}`)
         .send({ credential: getUnsignedVC() })
 
@@ -245,7 +246,7 @@ describe('api', () => {
         'base64'
       )
       const response = await request(app)
-        .post(`/instance/${authedTenant}/credentials/issue`)
+        .post(issuePath)
         .set('Authorization', `Basic ${credentials}`)
         .send({ credential: sentCred })
 
@@ -259,18 +260,20 @@ describe('api', () => {
         'base64'
       )
       const response = await request(app)
-        .post(`/instance/${authedTenant}/credentials/issue`)
+        .post(issuePath)
         .set('Authorization', `Basic ${credentials}`)
         .send({}) // No credential property
 
       expect(response.status).to.eql(400)
     })
 
-    it('works without auth when tenant has no authToken configured', async () => {
+    it('returns 200 for tenant without authToken using Basic Auth (password ignored)', async () => {
       const noAuthTenant = 'testing' // Default tenant with no auth token
       const sentCred = getUnsignedVCWithStatus()
+      const credentials = Buffer.from(`${noAuthTenant}:any`).toString('base64')
       const response = await request(app)
-        .post(`/instance/${noAuthTenant}/credentials/issue`)
+        .post(issuePath)
+        .set('Authorization', `Basic ${credentials}`)
         .send({ credential: sentCred })
 
       expect(response.header['content-type']).to.have.string('json')
@@ -278,10 +281,13 @@ describe('api', () => {
       expect(response.body.proof.type).to.eql('Ed25519Signature2020')
     })
 
-    it('returns 404 for non-existent tenant', async () => {
+    it('returns 404 for non-existent tenant (Basic Auth)', async () => {
+      const credentials = Buffer.from('nonexistenttenant:sometoken').toString(
+        'base64'
+      )
       const response = await request(app)
-        .post('/instance/nonexistenttenant/credentials/issue')
-        .set('Authorization', 'Bearer sometoken')
+        .post(issuePath)
+        .set('Authorization', `Basic ${credentials}`)
         .send({ credential: getUnsignedVC() })
 
       expect(response.status).to.eql(404)
@@ -289,7 +295,7 @@ describe('api', () => {
 
     it('returns 401 with malformed Basic Auth (missing encoded part)', async () => {
       const response = await request(app)
-        .post(`/instance/${authedTenant}/credentials/issue`)
+        .post(issuePath)
         .set('Authorization', 'Basic ') // Missing encoded part
         .send({ credential: getUnsignedVC() })
 
@@ -299,7 +305,7 @@ describe('api', () => {
     it('returns 401 with Basic Auth missing username', async () => {
       const credentials = Buffer.from(`:${testToken}`).toString('base64') // Empty username
       const response = await request(app)
-        .post(`/instance/${authedTenant}/credentials/issue`)
+        .post(issuePath)
         .set('Authorization', `Basic ${credentials}`)
         .send({ credential: getUnsignedVC() })
 
@@ -309,7 +315,7 @@ describe('api', () => {
     it('returns 401 with Basic Auth missing password', async () => {
       const credentials = Buffer.from(`${authedTenant}:`).toString('base64') // Empty password
       const response = await request(app)
-        .post(`/instance/${authedTenant}/credentials/issue`)
+        .post(issuePath)
         .set('Authorization', `Basic ${credentials}`)
         .send({ credential: getUnsignedVC() })
 
@@ -318,7 +324,7 @@ describe('api', () => {
 
     it('returns 401 with invalid Bearer format (missing token)', async () => {
       const response = await request(app)
-        .post(`/instance/${authedTenant}/credentials/issue`)
+        .post(issuePath)
         .set('Authorization', 'Bearer ') // Missing token
         .send({ credential: getUnsignedVC() })
 
@@ -327,7 +333,7 @@ describe('api', () => {
 
     it('returns 401 with unknown authorization scheme', async () => {
       const response = await request(app)
-        .post(`/instance/${authedTenant}/credentials/issue`)
+        .post(issuePath)
         .set('Authorization', 'Digest username=test') // Unknown scheme
         .send({ credential: getUnsignedVC() })
 
@@ -336,7 +342,7 @@ describe('api', () => {
 
     it('returns 401 with malformed Basic Auth (invalid base64)', async () => {
       const response = await request(app)
-        .post(`/instance/${authedTenant}/credentials/issue`)
+        .post(issuePath)
         .set('Authorization', 'Basic not-valid-base64!!!') // Invalid base64
         .send({ credential: getUnsignedVC() })
 
