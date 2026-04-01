@@ -7,6 +7,7 @@ import accessLogger from './middleware/accessLogger.js'
 import errorHandler from './middleware/errorHandler.js'
 import errorLogger from './middleware/errorLogger.js'
 import invalidPathHandler from './middleware/invalidPathHandler.js'
+import { authenticateBearerToken } from './middleware/auth.js'
 import SigningException from './SigningException.js'
 import { getUnsignedVC } from './test-fixtures/vc.js'
 import { TEST_TENANT_NAME, fetchAndUpdateTenantSeeds } from './config.js'
@@ -59,6 +60,30 @@ export async function build() {
       next(e)
     }
   })
+
+  // VCALM-compatible issue endpoint with authentication
+  app.post(
+    '/instance/:instanceId/credentials/issue',
+    authenticateBearerToken,
+    async (req, res, next) => {
+      try {
+        const instanceId = req.params.instanceId
+        const { credential } = req.body
+
+        if (!credential || !Object.keys(credential).length) {
+          throw new SigningException(
+            400,
+            'A verifiable credential must be provided in the credential property.'
+          )
+        }
+
+        const signedVC = await issue(credential, instanceId)
+        return res.json(signedVC)
+      } catch (e) {
+        next(e)
+      }
+    }
+  )
 
   app.get('/refresh-seeds', async (_, res) => {
     await fetchAndUpdateTenantSeeds()
