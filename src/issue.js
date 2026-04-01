@@ -1,5 +1,5 @@
-import { Ed25519Signature2020 } from '@digitalbazaar/ed25519-signature-2020'
 import { Ed25519VerificationKey2020 } from '@digitalbazaar/ed25519-verification-key-2020'
+import * as Ed25519Multikey from '@digitalbazaar/ed25519-multikey'
 import { CryptoLD } from 'crypto-ld'
 import { driver as keyDriver } from '@digitalbazaar/did-method-key'
 import { driver as webDriver } from '@interop/did-web-resolver'
@@ -7,6 +7,8 @@ import { securityLoader } from '@digitalcredentials/security-document-loader'
 import { getTenantSeed } from './config.js'
 import SigningException from './SigningException.js'
 import { issue as signVC } from '@digitalbazaar/vc'
+import * as Ed25519Signature2020Suite from './suites/Ed25519Signature2020Suite.js'
+import * as EddsaRdfc2022Suite from './suites/EddsaRdfc2022Suite.js'
 
 let ISSUER_INSTANCES = {}
 const documentLoader = securityLoader().build()
@@ -30,18 +32,22 @@ export const clearIssuerInstances = () => {
 }
 
 const getIssuerInstance = async (instanceId) => {
-  if (!ISSUER_INSTANCES[instanceId]) {
-    const config = await getTenantSeed(instanceId)
-    if (!config?.didSeed)
-      throw new SigningException(404, "Tenant doesn't exist.")
-    const { didSeed, didMethod, didUrl } = config
-    ISSUER_INSTANCES[instanceId] = await buildIssuerInstance(
+  const config = await getTenantSeed(instanceId)
+  if (!config?.didSeed) throw new SigningException(404, "Tenant doesn't exist.")
+
+  const { didSeed, didMethod, didUrl, cryptosuite } = config
+  // Include cryptosuite in cache key to handle tenants with different suites
+  const cacheKey = `${instanceId}:${cryptosuite || 'legacy'}`
+
+  if (!ISSUER_INSTANCES[cacheKey]) {
+    ISSUER_INSTANCES[cacheKey] = await buildIssuerInstance(
       didSeed,
       didMethod,
-      didUrl
+      didUrl,
+      cryptosuite
     )
   }
-  return ISSUER_INSTANCES[instanceId]
+  return ISSUER_INSTANCES[cacheKey]
 }
 
 const issue = async (unsignedVerifiableCredential, instanceId) => {
@@ -79,14 +85,36 @@ const addIssuerId = (credential, issuerId) => {
   }
 }
 
-const buildIssuerInstance = async (seed, method, url) => {
-  const { didDocument, key } = await getSigningMaterial({ seed, method, url })
-  const signingSuite = new Ed25519Signature2020({ key })
+/**
+ * Selects the appropriate suite module based on cryptosuite configuration.
+ *
+ * @param {string} cryptosuite - The cryptosuite name (e.g., 'eddsa-rdfc-2022')
+ * @returns {object} The suite module
+ */
+const selectSuite = (cryptosuite) => {
+  switch (cryptosuite) {
+    case 'eddsa-rdfc-2022':
+      return EddsaRdfc2022Suite
+    default:
+      // Default to legacy Ed25519Signature2020
+      return Ed25519Signature2020Suite
+  }
+}
+
+const buildIssuerInstance = async (seed, method, url, cryptosuite) => {
+  const { didDocument, key } = await getSigningMaterial({
+    seed,
+    method,
+    url,
+    cryptosuite
+  })
+  const suiteModule = selectSuite(cryptosuite)
+  const signingSuite = suiteModule.createSuite(key)
   const issuerInstance = new IssuerInstance({ documentLoader, signingSuite })
   return { issuerInstance, didDocument }
 }
 
-export async function getSigningMaterial({ method, seed, url }) {
+export async function getSigningMaterial({ method, seed, url, cryptosuite }) {
   let did, key
   if (method === 'web') {
     did = await didWebDriver.generate({ seed, url })
@@ -97,13 +125,27 @@ export async function getSigningMaterial({ method, seed, url }) {
     })
     did = await didKeyDriver.fromKeyPair({ verificationKeyPair })
     const assertionMethod = did.methodFor({ purpose: 'assertionMethod' })
-    key = await Ed25519VerificationKey2020.from({
-      type: assertionMethod.type,
-      controller: assertionMethod.controller,
-      id: assertionMethod.id,
-      publicKeyMultibase: assertionMethod.publicKeyMultibase,
-      privateKeyMultibase: verificationKeyPair.privateKeyMultibase
-    })
+
+    // For eddsa-rdfc-2022, we need an Ed25519Multikey signer
+    if (cryptosuite === 'eddsa-rdfc-2022') {
+      // Import the existing key pair as Ed25519Multikey
+      key = await Ed25519Multikey.from({
+        type: 'Multikey',
+        id: assertionMethod.id,
+        controller: assertionMethod.controller,
+        publicKeyMultibase: assertionMethod.publicKeyMultibase,
+        secretKeyMultibase: verificationKeyPair.privateKeyMultibase
+      })
+    } else {
+      // Legacy Ed25519Signature2020 uses the key object directly
+      key = await Ed25519VerificationKey2020.from({
+        type: assertionMethod.type,
+        controller: assertionMethod.controller,
+        id: assertionMethod.id,
+        publicKeyMultibase: assertionMethod.publicKeyMultibase,
+        privateKeyMultibase: verificationKeyPair.privateKeyMultibase
+      })
+    }
   }
   return { didDocument: did.didDocument, key }
 }

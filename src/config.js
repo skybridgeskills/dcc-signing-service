@@ -86,7 +86,9 @@ async function getTenantsFromAwsSecretsManager() {
       validTenants.push({
         name: tenantName,
         didSeed: secretData.seed,
-        didMethod: 'key' // Default to 'key' method
+        didMethod: 'key', // Default to 'key' method
+        cryptosuite: secretData.cryptosuite,
+        authToken: secretData.authToken
       })
     }
 
@@ -155,7 +157,9 @@ export async function fetchAndUpdateTenantSeeds() {
         process.env[`TENANT_DIDMETHOD_${tenant}`].toLowerCase() === 'web'
           ? 'web'
           : 'key',
-      didUrl: process.env[`TENANT_DID_URL_${tenant}`]
+      didUrl: process.env[`TENANT_DID_URL_${tenant}`],
+      cryptosuite: process.env[`TENANT_CRYPTOSUITE_${tenant}`],
+      authToken: process.env[`TENANT_AUTH_TOKEN_${tenant}`]
     }
   }
 }
