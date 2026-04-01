@@ -19,6 +19,7 @@ IMPORTANT NOTE ABOUT VERSIONING: If you are using a Docker Hub image of this rep
   - [Revocation](#revocation)
 - [Usage](#usage)
   - [Sign a credential](#sign-a-credential)
+  - [VCALM Issue Endpoint](#vcalm-issue-endpoint)
   - [Learner Credential Wallet](#learner-credential-wallet)
 - [Versioning](#versioning)
 - [Logging](#logging)
@@ -32,11 +33,15 @@ IMPORTANT NOTE ABOUT VERSIONING: If you are using a Docker Hub image of this rep
 
 Use this express server to sign [Verifiable Credentials](https://www.w3.org/TR/vc-data-model/). NEW: as of version 1.0.0 the signing-service works with both version 1 and version 2 Verifiable Credentials.
 
-Implements four http endpoints:
+Implements five http endpoints:
 
 - POST /instance/:instanceId/credentials/sign
 
-Which signs and returns a [Verifiable Credential](https://www.w3.org/TR/vc-data-model/) that has been posted to it.
+Which signs and returns a [Verifiable Credential](https://www.w3.org/TR/vc-data-model/) that has been posted to it. This is the legacy endpoint for backwards compatibility.
+
+- POST /instance/:instanceId/credentials/issue
+
+Which is the VCALM-compatible endpoint for issuing credentials. Supports Bearer token and Basic Auth authentication. See the [VCALM Issue Endpoint](#vcalm-issue-endpoint) section.
 
 - GET /did-key-generator
 
@@ -82,34 +87,36 @@ IMPORTANT: this quick start version uses a test signing key that is not register
 
 There is a sample .env file provided called .env.example to help you get started with your own .env file. The supported fields:
 
-| Key                              | Description                                                                                  | Default                    | Required |
-| -------------------------------- | -------------------------------------------------------------------------------------------- | -------------------------- | -------- |
-| `PORT`                           | http port on which to run the express app                                                    | 4006                       | no       |
-| `ENABLE_HTTPS_FOR_DEV`           | runs the dev server over https - ONLY FOR DEV - typically to allow CORS calls from a browser | false                      | no       |
-| `TENANT_SEED_{TENANT_NAME}`      | see [tenants](#tenants) section for instructions                                             | no                         | no       |
-| `TENANT_DIDMETHOD_{TENANT_NAME}` | did method (`key` or `web`) to use for signing on this tenant                                | `key`                      | no       |
-| `TENANT_DID_URL_{TENANT_NAME}`   | url to use for did:web                                                                       |                            | no       |
-| `ENABLE_ACCESS_LOGGING`          | log all http calls to the service - see [Logging](#logging)                                  | true                       | no       |
-| `ERROR_LOG_FILE`                 | log file for all errors - see [Logging](#logging)                                            | no                         | no       |
-| `LOG_ALL_FILE`                   | log file for everything - see [Logging](#logging)                                            | no                         | no       |
-| `CONSOLE_LOG_LEVEL`              | console log level - see [Logging](#logging)                                                  | silly                      | no       |
-| `LOG_LEVEL`                      | log level for application - see [Logging](#logging)                                          | silly                      | no       |
-| `HEALTH_CHECK_SMTP_HOST`         | SMTP host for unhealthy notification emails - see [Health Check](#health-check)              | no                         | no       |
-| `HEALTH_CHECK_SMTP_USER`         | SMTP user for unhealthy notification emails - see [Health Check](#health-check)              | no                         | no       |
-| `HEALTH_CHECK_SMTP_PASS`         | SMTP password for unhealthy notification emails - see [Health Check](#health-check)          | no                         | no       |
-| `HEALTH_CHECK_EMAIL_FROM`        | name of email sender for unhealthy notifications emails - see [Health Check](#health-check)  | no                         | no       |
-| `HEALTH_CHECK_EMAIL_RECIPIENT`   | recipient when unhealthy - see [Health Check](#health-check)                                 | no                         | no       |
-| `HEALTH_CHECK_EMAIL_SUBJECT`     | email subject when unhealthy - see [Health Check](#health-check)                             | no                         | no       |
-| `HEALTH_CHECK_WEB_HOOK`          | posted to when unhealthy - see [Health Check](#health-check)                                 | no                         | no       |
-| `HEALTH_CHECK_SERVICE_URL`       | local url for this service - see [Health Check](#health-check)                               | http://SIGNER:4006/healthz | no       |
-| `HEALTH_CHECK_SERVICE_NAME`      | service name to use in error messages - see [Health Check](#health-check)                    | SIGNING-SERVICE            | no       |
+| Key                                | Description                                                                                                         | Default                    | Required |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------- | -------- |
+| `PORT`                             | http port on which to run the express app                                                                           | 4006                       | no       |
+| `ENABLE_HTTPS_FOR_DEV`             | runs the dev server over https - ONLY FOR DEV - typically to allow CORS calls from a browser                        | false                      | no       |
+| `TENANT_SEED_{TENANT_NAME}`        | see [tenants](#tenants) section for instructions                                                                    | no                         | no       |
+| `TENANT_DIDMETHOD_{TENANT_NAME}`   | did method (`key` or `web`) to use for signing on this tenant                                                       | `key`                      | no       |
+| `TENANT_DID_URL_{TENANT_NAME}`     | url to use for did:web                                                                                              |                            | no       |
+| `TENANT_CRYPTOSUITE_{TENANT_NAME}` | cryptosuite to use (`eddsa-rdfc-2022` for DataIntegrityProof, omit for Ed25519Signature2020)                        | `Ed25519Signature2020`     | no       |
+| `TENANT_AUTH_TOKEN_{TENANT_NAME}`  | Bearer token or Basic Auth password for `/credentials/issue` endpoint - see [VCALM endpoint](#vcalm-issue-endpoint) |                            | no       |
+| `ENABLE_ACCESS_LOGGING`            | log all http calls to the service - see [Logging](#logging)                                                         | true                       | no       |
+| `ERROR_LOG_FILE`                   | log file for all errors - see [Logging](#logging)                                                                   | no                         | no       |
+| `LOG_ALL_FILE`                     | log file for everything - see [Logging](#logging)                                                                   | no                         | no       |
+| `CONSOLE_LOG_LEVEL`                | console log level - see [Logging](#logging)                                                                         | silly                      | no       |
+| `LOG_LEVEL`                        | log level for application - see [Logging](#logging)                                                                 | silly                      | no       |
+| `HEALTH_CHECK_SMTP_HOST`           | SMTP host for unhealthy notification emails - see [Health Check](#health-check)                                     | no                         | no       |
+| `HEALTH_CHECK_SMTP_USER`           | SMTP user for unhealthy notification emails - see [Health Check](#health-check)                                     | no                         | no       |
+| `HEALTH_CHECK_SMTP_PASS`           | SMTP password for unhealthy notification emails - see [Health Check](#health-check)                                 | no                         | no       |
+| `HEALTH_CHECK_EMAIL_FROM`          | name of email sender for unhealthy notifications emails - see [Health Check](#health-check)                         | no                         | no       |
+| `HEALTH_CHECK_EMAIL_RECIPIENT`     | recipient when unhealthy - see [Health Check](#health-check)                                                        | no                         | no       |
+| `HEALTH_CHECK_EMAIL_SUBJECT`       | email subject when unhealthy - see [Health Check](#health-check)                                                    | no                         | no       |
+| `HEALTH_CHECK_WEB_HOOK`            | posted to when unhealthy - see [Health Check](#health-check)                                                        | no                         | no       |
+| `HEALTH_CHECK_SERVICE_URL`         | local url for this service - see [Health Check](#health-check)                                                      | http://SIGNER:4006/healthz | no       |
+| `HEALTH_CHECK_SERVICE_NAME`        | service name to use in error messages - see [Health Check](#health-check)                                           | SIGNING-SERVICE            | no       |
 
 ### Tenants
 
 You might want to allow more than one signing key ([DID](https://www.w3.org/TR/did-core/)) to be used with the issuer. For example, you might want to sign university/college degree diplomas with a key ([DID](https://www.w3.org/TR/did-core/)) that is only used by the registrar, but then also allow certificates for individual courses to be signed by by different keys ([DIDs](https://www.w3.org/TR/did-core/)) that are owned by the faculty or department that teaches the course.
 
 We're calling these different signing authorities 'tenants' (or 'instances'). You can set up as many tenants as you like by including a `TENANT_SEED_{TENANT_NAME}={seed}` environment variable for every 'tenant'. (NOTE: if you are using a did:web key, you must additinally specify `TENANT_DIDMETHOD_{TENANT_NAME}=web` and `TENANT_DID_URL_{TENANT_NAME}={the url for your did:web}`) for each did:web tenant. Read more in the [did:web generator section](#didweb-generator).
-z
+
 NOTE: the `seed` is explained below in the [Signing key section](#signing-key).
 
 So, if you wanted to set up two tenants, one for degrees and one for completion of the Econ101 course then you could create the tenants by setting the following in the .env file:
@@ -126,7 +133,17 @@ http://myhost.org/instance/degrees/credentials/issue
 http://myhost.org/instance/econ101/credentials/issue
 ```
 
-Note that these are all unsecured calls. You can choose to implement security as best suits your needs. For one example of a bearer token approach, take a look at the [DCC Issuer Coordinator](https://github.com/digitalcredentials/issuer-coordinator).
+Note that the legacy `/credentials/sign` endpoint is unsecured by default. The new `/credentials/issue` endpoint (VCALM-compatible) supports Bearer token and Basic Auth when `TENANT_AUTH_TOKEN_{TENANT_NAME}` is configured. See the [VCALM Issue Endpoint](#vcalm-issue-endpoint) section for details.
+
+#### Cryptosuite Configuration
+
+By default, tenants use the `Ed25519Signature2020` proof type for signing credentials. You can configure a tenant to use the modern `eddsa-rdfc-2022` cryptosuite (which produces `DataIntegrityProof` proofs) by setting:
+
+```
+TENANT_CRYPTOSUITE_DEGREES=eddsa-rdfc-2022
+```
+
+When `eddsa-rdfc-2022` is specified, the service will use the Data Integrity specification with the eddsa-rdfc-2022 cryptosuite. If not specified (or set to any other value), the service defaults to `Ed25519Signature2020` for backwards compatibility.
 
 #### Default Tenants
 
@@ -501,6 +518,75 @@ This should return a fully formed and signed credential printed to the terminal,
 </details>
 
 NOTE: CURL can get a bit clunky if you want to experiment - you might consider trying [Postman](https://www.postman.com/downloads/) which makes it a bit easier to construct and send http calls.
+
+### VCALM Issue Endpoint
+
+The service also supports the VCALM (Verifiable Credentials API for Learner Records Management) `/credentials/issue` endpoint. This endpoint is similar to the `/credentials/sign` endpoint but follows the VCALM specification format and supports authentication.
+
+#### POST /instance/:instanceId/credentials/issue
+
+This endpoint follows the VCALM specification for issuing credentials. It accepts both Bearer token and Basic Auth authentication methods when `TENANT_AUTH_TOKEN_{TENANT_NAME}` is configured for the tenant.
+
+**Authentication:**
+
+- **Bearer Token**: `Authorization: Bearer <token>` where `<token>` matches the `TENANT_AUTH_TOKEN_{TENANT_NAME}` value
+- **Basic Auth**: `Authorization: Basic <base64(username:password)>` where `username` is the tenant name and `password` matches the `TENANT_AUTH_TOKEN_{TENANT_NAME}` value
+
+If `TENANT_AUTH_TOKEN_{TENANT_NAME}` is not configured for a tenant, the endpoint is accessible without authentication (backwards compatible).
+
+**Headers:**
+
+- `Authorization: Bearer <token>` OR `Authorization: Basic <base64(username:password)>` (required only if tenant has auth token configured)
+- `Content-Type: application/json`
+
+**Request Body:**
+
+```json
+{
+  "credential": {
+    "@context": ["https://www.w3.org/2018/credentials/v1", ...],
+    "type": ["VerifiableCredential", ...],
+    "issuer": {...},
+    "credentialSubject": {...}
+  }
+}
+```
+
+**Example with Bearer Token:**
+
+```bash
+curl --location 'http://localhost:4006/instance/test/credentials/issue' \
+--header 'Authorization: Bearer mysecrettoken' \
+--header 'Content-Type: application/json' \
+--data '{
+  "credential": {
+    "@context": ["https://www.w3.org/2018/credentials/v1"],
+    "type": ["VerifiableCredential"],
+    "issuer": {"id": "did:example:123", "name": "Test"},
+    "credentialSubject": {"id": "did:example:456"}
+  }
+}'
+```
+
+**Example with Basic Auth:**
+
+```bash
+curl --location 'http://localhost:4006/instance/test/credentials/issue' \
+--header 'Authorization: Basic dGVzdDpteXNlY3JldHRva2Vu' \
+--header 'Content-Type: application/json' \
+--data '{
+  "credential": {
+    "@context": ["https://www.w3.org/2018/credentials/v1"],
+    "type": ["VerifiableCredential"],
+    "issuer": {"id": "did:example:123", "name": "Test"},
+    "credentialSubject": {"id": "did:example:456"}
+  }
+}'
+```
+
+Note: In the Basic Auth example, `dGVzdDpteXNlY3JldHRva2Vu` is the base64 encoding of `test:mysecrettoken` (username:password).
+
+The cryptosuite used for signing is determined by the `TENANT_CRYPTOSUITE_{TENANT_NAME}` configuration. If not specified, the service defaults to `Ed25519Signature2020`.
 
 ### Learner Credential Wallet
 
