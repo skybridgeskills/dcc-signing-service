@@ -14,6 +14,9 @@ importers:
       '@digitalbazaar/cborld':
         specifier: ^7.1.2
         version: 7.3.0
+      '@digitalbazaar/data-integrity':
+        specifier: ^2.5.0
+        version: 2.5.0(web-streams-polyfill@3.3.3)
       '@digitalbazaar/did-method-key':
         specifier: ^5.2.0
         version: 5.2.0
@@ -23,6 +26,9 @@ importers:
       '@digitalbazaar/ed25519-verification-key-2020':
         specifier: ^4.1.0
         version: 4.2.0
+      '@digitalbazaar/eddsa-rdfc-2022-cryptosuite':
+        specifier: ^1.2.0
+        version: 1.3.0
       '@digitalbazaar/vc':
         specifier: ^7.0.0
         version: 7.2.0(web-streams-polyfill@3.3.3)
@@ -389,6 +395,10 @@ packages:
     resolution: {integrity: sha512-XpXUzId6ZIEaNq9R+Fv3LrArj1bRj0QX3yfYgxi2bGZGIMs8EkdwsQdzTq38cmHXBQz4DASVun7mBtwrEqjf3g==}
     engines: {node: '>=18'}
 
+  '@digitalbazaar/data-integrity@2.5.0':
+    resolution: {integrity: sha512-ohIieLfgtPQU9BYfj0eKNiz55/ZDOk5YSE9FN/Hn0eXzI8WQzLkzRvC8pvBnzuzXDgCsjPdSqYvzok5PoClMBQ==}
+    engines: {node: '>=18'}
+
   '@digitalbazaar/did-io@2.0.0':
     resolution: {integrity: sha512-6dG0nOytVN1ntCbf9ffB/BLSQszfDEEBbemMu8l1/yn8fOLMKABNu13/yfp8tPtqSowz3P0SWt6YNcYLf49sAw==}
     engines: {node: '>=14'}
@@ -409,9 +419,17 @@ packages:
     resolution: {integrity: sha512-urEVTYkt+uYD8GjdoS6gkm2sKBich1hqx42b6vvUOmNgF0agZ95JlUjiJXEx+VOwu7WSjJSnEBph2Qatkrk1CA==}
     engines: {node: '>=14'}
 
+  '@digitalbazaar/eddsa-rdfc-2022-cryptosuite@1.3.0':
+    resolution: {integrity: sha512-IcxYKnxYEaJ1xLEcsddIYb+ooQPQ8pM54NKDDH5eDpF8pEY5E/dqrkJv+o6yHUuoXDjwjhvPQSj6nE0rF32Q/w==}
+    engines: {node: '>=18'}
+
   '@digitalbazaar/http-client@3.4.1':
     resolution: {integrity: sha512-Ahk1N+s7urkgj7WvvUND5f8GiWEPfUw0D41hdElaqLgu8wZScI8gdI0q+qWw5N1d35x7GCRH2uk9mi+Uzo9M3g==}
     engines: {node: '>=14.0'}
+
+  '@digitalbazaar/http-client@4.3.0':
+    resolution: {integrity: sha512-6lMpxpt9BOmqHKGs9Xm6DP4LlZTBFer/ZjHvP3FcW3IaUWYIWC7dw5RFZnvw4fP57kAVcm1dp3IF+Y50qhBvAw==}
+    engines: {node: '>=18.0'}
 
   '@digitalbazaar/lru-memoize@3.0.2':
     resolution: {integrity: sha512-O7fv5GnFY/XZggJ3bQuce1E4LcFxrexSJmubto8v3YABaIuP5McQFAxn3m9oV6BHRQXa/wURItpvY/g5X3kwVw==}
@@ -1156,6 +1174,10 @@ packages:
 
   canonicalize@1.0.8:
     resolution: {integrity: sha512-0CNTVCLZggSh7bc5VkX5WWPWO+cyZbNd07IHIsSXLia/eAq+r836hgk+8BKoEh7949Mda87VUOitx5OddVj64A==}
+
+  canonicalize@2.1.0:
+    resolution: {integrity: sha512-F705O3xrsUtgt98j7leetNhTWPe+5S72rlL5O4jA1pKqBVQ/dT1O1D6PFxmSXvc0SUOinWS57DKx0I3CHrXJHQ==}
+    hasBin: true
 
   caseless@0.12.0:
     resolution: {integrity: sha512-4tYFyifaFfGacoiObjJegolkwSU4xQNGbVgUiNYVUxbQ2x2lUsFvY4hVgVzGiIe6WLOPqycWXA40l+PWsxthUw==}
@@ -2065,6 +2087,10 @@ packages:
     resolution: {integrity: sha512-9YcilrF+dLfg9NTEof/mJLMtbdX1RJ8dbWtJgE00cMOIohb1lIyJl710vFiTaiHTl6ZYODJuBd32xFvUhmv3kg==}
     engines: {node: '>=14'}
 
+  jsonld@9.0.0:
+    resolution: {integrity: sha512-pjMIdkXfC1T2wrX9B9i2uXhGdyCmgec3qgMht+TDj+S0qX3bjWMQUfL7NeqEhuRTi8G5ESzmL9uGlST7nzSEWg==}
+    engines: {node: '>=18'}
+
   jsprim@1.4.2:
     resolution: {integrity: sha512-P2bSOMAc/ciLz6DzgjVlGJP9+BrJWu5UDGK70C2iweC5QBIeFf0ZXRvGjEj2uYgrY2MkAAhsSWHDWlFtEroZWw==}
     engines: {node: '>=0.6.0'}
@@ -2088,6 +2114,10 @@ packages:
   ky@0.33.3:
     resolution: {integrity: sha512-CasD9OCEQSFIam2U8efFK81Yeg8vNMTBUqtMOHlrcWQHqUX3HeCl9Dr31u4toV7emlH8Mymk5+9p0lL6mKb/Xw==}
     engines: {node: '>=14.16'}
+
+  ky@1.14.3:
+    resolution: {integrity: sha512-9zy9lkjac+TR1c2tG+mkNSVlyOpInnWdSMiue4F+kq8TwJSgv6o8jhLRg8Ho6SnZ9wOYUq/yozts9qQCfk7bIw==}
+    engines: {node: '>=18'}
 
   ky@1.8.1:
     resolution: {integrity: sha512-7Bp3TpsE+L+TARSnnDpk3xg8Idi8RwSLdj6CMbNWoOARIrGrbuLGusV0dYwbZOm4bB3jHNxSw8Wk/ByDqJEnDw==}
@@ -2576,6 +2606,10 @@ packages:
     resolution: {integrity: sha512-B5ynHt4sasbUafzrvYI2GFARgeFcD8Sx9yXPbg7gEyT2EH76rlCv84kyO6tnxzVbxUN/uJDbK1S/MXh+DsnuTA==}
     engines: {node: '>=18'}
 
+  rdf-canonize@5.0.0:
+    resolution: {integrity: sha512-g8OUrgMXAR9ys/ZuJVfBr05sPPoMA7nHIVs8VEvg9QwM5W4GR2qSFEEHjsyHF1eWlBaf8Ev40WNjQFQ+nJTO3w==}
+    engines: {node: '>=18'}
+
   react-devtools-core@6.1.2:
     resolution: {integrity: sha512-ldFwzufLletzCikNJVYaxlxMLu7swJ3T2VrGfzXlMsVhZhPDKXA38DEROidaYZVgMAmQnIjymrmqto5pyfrwPA==}
 
@@ -2981,6 +3015,10 @@ packages:
 
   undici@6.21.3:
     resolution: {integrity: sha512-gBLkYIlEnSp8pFbT64yFgGE6UIB9tAkhukC23PmMDCe5Nd+cRqKxSjw5y54MK2AZMgZfJWMaNE4nYUHgi1XEOw==}
+    engines: {node: '>=18.17'}
+
+  undici@6.27.0:
+    resolution: {integrity: sha512-YmfV3YnEDzXRC5lZ2jWtWWHKGUm1zIt8AhesR1tens+HTNv+YZlN/dp6G727LOvMJ8xjP9Be7Y2Sdr96LDm+pg==}
     engines: {node: '>=18.17'}
 
   unpipe@1.0.0:
@@ -3711,6 +3749,14 @@ snapshots:
 
   '@digitalbazaar/data-integrity-context@2.0.1': {}
 
+  '@digitalbazaar/data-integrity@2.5.0(web-streams-polyfill@3.3.3)':
+    dependencies:
+      base58-universal: 2.0.0
+      base64url-universal: 2.0.0
+      jsonld-signatures: 11.5.0(web-streams-polyfill@3.3.3)
+    transitivePeerDependencies:
+      - web-streams-polyfill
+
   '@digitalbazaar/did-io@2.0.0':
     dependencies:
       '@digitalbazaar/lru-memoize': 3.0.2
@@ -3744,6 +3790,12 @@ snapshots:
       base64url-universal: 2.0.0
       crypto-ld: 7.0.0
 
+  '@digitalbazaar/eddsa-rdfc-2022-cryptosuite@1.3.0':
+    dependencies:
+      '@digitalbazaar/ed25519-multikey': 1.3.1
+      jsonld: 9.0.0
+      rdf-canonize: 5.0.0
+
   '@digitalbazaar/http-client@3.4.1(web-streams-polyfill@3.3.3)':
     dependencies:
       ky: 0.33.3
@@ -3751,6 +3803,11 @@ snapshots:
       undici: 5.29.0
     transitivePeerDependencies:
       - web-streams-polyfill
+
+  '@digitalbazaar/http-client@4.3.0':
+    dependencies:
+      ky: 1.14.3
+      undici: 6.27.0
 
   '@digitalbazaar/lru-memoize@3.0.2':
     dependencies:
@@ -4717,6 +4774,8 @@ snapshots:
 
   canonicalize@1.0.8: {}
 
+  canonicalize@2.1.0: {}
+
   caseless@0.12.0: {}
 
   cborg@4.2.11: {}
@@ -5664,6 +5723,13 @@ snapshots:
     transitivePeerDependencies:
       - web-streams-polyfill
 
+  jsonld@9.0.0:
+    dependencies:
+      '@digitalbazaar/http-client': 4.3.0
+      canonicalize: 2.1.0
+      lru-cache: 6.0.0
+      rdf-canonize: 5.0.0
+
   jsprim@1.4.2:
     dependencies:
       assert-plus: 1.0.0
@@ -5686,6 +5752,8 @@ snapshots:
       web-streams-polyfill: 3.3.3
 
   ky@0.33.3: {}
+
+  ky@1.14.3: {}
 
   ky@1.8.1: {}
 
@@ -6276,6 +6344,10 @@ snapshots:
     dependencies:
       setimmediate: 1.0.5
 
+  rdf-canonize@5.0.0:
+    dependencies:
+      setimmediate: 1.0.5
+
   react-devtools-core@6.1.2:
     dependencies:
       shell-quote: 1.8.2
@@ -6735,6 +6807,8 @@ snapshots:
       '@fastify/busboy': 2.1.1
 
   undici@6.21.3: {}
+
+  undici@6.27.0: {}
 
   unpipe@1.0.0: {}
 
