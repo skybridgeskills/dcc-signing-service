@@ -29,6 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: test-node
     if: github.ref == 'refs/heads/main'
+    outputs:
+      digest: ${{ steps.build-push.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
 
@@ -62,6 +64,7 @@ jobs:
           echo "short_sha=${GITHUB_SHA:0:7}" >> $GITHUB_OUTPUT
 
       - name: Build and push Docker image
+        id: build-push
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -76,3 +79,31 @@ jobs:
             skybridgeskills/dcc-signing-service:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  trigger-monorepo-bump:
+    needs: docker-build-push
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Non-blocking: until the monorepo GitHub App credentials (MONOREPO_APP_ID /
+    # MONOREPO_APP_PRIVATE_KEY) are configured in this repo, this job fails and
+    # must not break the pipeline. Removing this flag once credentials exist is
+    # optional follow-up.
+    continue-on-error: true
+    steps:
+      - name: Generate GitHub App token
+        id: generate-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.MONOREPO_APP_ID }}
+          private-key: ${{ secrets.MONOREPO_APP_PRIVATE_KEY }}
+          owner: skybridgeskills
+          repositories: skybridgeskills-monorepo
+
+      - name: Dispatch monorepo image ref bump
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          gh workflow run dcc-services-bump-version.yml \
+            --repo skybridgeskills/skybridgeskills-monorepo --ref main \
+            -f service=signing-service \
+            -f image_ref="@${{ needs.docker-build-push.outputs.digest }}"
