@@ -23,8 +23,35 @@ function rebuildTokenToTenantMap() {
   TOKEN_TO_TENANT.clear()
   for (const [name, cfg] of Object.entries(DID_SEEDS)) {
     if (cfg && typeof cfg === 'object' && cfg.authToken) {
+      const existing = TOKEN_TO_TENANT.get(cfg.authToken)
+      if (existing && existing !== name) {
+        console.warn(
+          `[auth] Duplicate TENANT_AUTH_TOKEN shared by tenants '${existing}' ` +
+            `and '${name}'. Bearer auth for this token will resolve to one tenant ` +
+            `only. Use a distinct token per tenant.`
+        )
+      }
       TOKEN_TO_TENANT.set(cfg.authToken, name)
     }
+  }
+  warnTokenlessTenants()
+}
+
+/**
+ * Emits one consolidated warning listing tenants without an authToken, which
+ * accept Basic Auth with any password on /credentials/issue. Intentional open
+ * mode; set a token to require authentication for those tenants.
+ */
+function warnTokenlessTenants() {
+  const tokenless = Object.entries(DID_SEEDS)
+    .filter(([, cfg]) => cfg && typeof cfg === 'object' && !cfg.authToken)
+    .map(([name]) => name)
+  if (tokenless.length) {
+    console.warn(
+      `[auth] Tenants without TENANT_AUTH_TOKEN accept any password on ` +
+        `/credentials/issue: ${tokenless.join(', ')}. Set a token to require ` +
+        `authentication for these tenants.`
+    )
   }
 }
 

@@ -101,6 +101,26 @@ const selectSuite = (cryptosuite) => {
   }
 }
 
+/**
+ * Injects any suite-required JSON-LD contexts into the credential, deduping
+ * while preserving order and keeping caller-supplied contexts first.
+ *
+ * @param {object} credential - The credential to inject contexts into (mutated)
+ * @param {string[]} requiredContexts - Context URLs the suite requires
+ */
+const injectContexts = (credential, requiredContexts) => {
+  const existing = Array.isArray(credential['@context'])
+    ? credential['@context']
+    : credential['@context']
+      ? [credential['@context']]
+      : []
+  const merged = [...existing]
+  for (const ctx of requiredContexts) {
+    if (!merged.includes(ctx)) merged.push(ctx)
+  }
+  credential['@context'] = merged
+}
+
 const buildIssuerInstance = async (seed, method, url, cryptosuite) => {
   const { didDocument, key } = await getSigningMaterial({
     seed,
@@ -110,7 +130,12 @@ const buildIssuerInstance = async (seed, method, url, cryptosuite) => {
   })
   const suiteModule = selectSuite(cryptosuite)
   const signingSuite = suiteModule.createSuite(key)
-  const issuerInstance = new IssuerInstance({ documentLoader, signingSuite })
+  const requiredContexts = suiteModule.getRequiredContexts()
+  const issuerInstance = new IssuerInstance({
+    documentLoader,
+    signingSuite,
+    requiredContexts
+  })
   return { issuerInstance, didDocument }
 }
 
@@ -151,13 +176,15 @@ export async function getSigningMaterial({ method, seed, url, cryptosuite }) {
 }
 
 export class IssuerInstance {
-  constructor({ documentLoader, signingSuite }) {
+  constructor({ documentLoader, signingSuite, requiredContexts }) {
     this.documentLoader = documentLoader
     this.signingSuite = signingSuite
+    this.requiredContexts = requiredContexts || []
   }
   async issueCredential({ credential, options }) {
     // this library attaches the signature on the original object, so make a copy
     const credCopy = JSON.parse(JSON.stringify(credential))
+    injectContexts(credCopy, this.requiredContexts)
     try {
       return signVC({
         credential: credCopy,

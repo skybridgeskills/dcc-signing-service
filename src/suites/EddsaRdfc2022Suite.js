@@ -10,7 +10,7 @@ import { cryptosuite as eddsaRdfc2022Cryptosuite } from '@digitalbazaar/eddsa-rd
  */
 export function createSuite(key) {
   return new DataIntegrityProof({
-    signer: key,
+    signer: key.signer(),
     cryptosuite: eddsaRdfc2022Cryptosuite
   })
 }

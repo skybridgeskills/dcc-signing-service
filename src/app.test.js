@@ -255,6 +255,82 @@ describe('api', () => {
       expect(response.body.proof.type).to.eql('Ed25519Signature2020')
     })
 
+    describe('eddsa-rdfc-2022 (DataIntegrityProof)', () => {
+      const diTenant = 'ditest'
+      const dataIntegrityContext = 'https://w3id.org/security/data-integrity/v2'
+
+      // A v2 credential the DI suite can sign. The eddsa-rdfc-2022 suite is
+      // incompatible with the v1 credential context used by the legacy
+      // fixtures, so use a minimal v2 credential here.
+      const getUnsignedDIVC = () => ({
+        '@context': ['https://www.w3.org/ns/credentials/v2'],
+        id: 'urn:uuid:2fe53dc9-b2ec-4939-9b2c-0d00f6663b6c',
+        type: ['VerifiableCredential'],
+        issuer: 'did:example:placeholder',
+        validFrom: '2023-08-02T17:43:32.903Z',
+        credentialSubject: {
+          id: 'did:example:subject',
+          name: 'Jane Doe'
+        }
+      })
+
+      beforeEach(() => {
+        process.env[`TENANT_SEED_${diTenant}`] =
+          'z1AeiPT496wWmo9BG2QYXeTusgFSZPNG3T9wNeTtjrQ3rCB'
+        process.env[`TENANT_CRYPTOSUITE_${diTenant}`] = 'eddsa-rdfc-2022'
+        resetConfig()
+        clearIssuerInstances()
+      })
+
+      afterEach(() => {
+        delete process.env[`TENANT_SEED_${diTenant}`]
+        delete process.env[`TENANT_CRYPTOSUITE_${diTenant}`]
+      })
+
+      it('issues a DataIntegrityProof for an eddsa-rdfc-2022 tenant', async () => {
+        const credentials = Buffer.from(`${diTenant}:any`).toString('base64')
+        const response = await request(app)
+          .post(issuePath)
+          .set('Authorization', `Basic ${credentials}`)
+          .send({ credential: getUnsignedDIVC() })
+
+        expect(response.status).to.eql(200)
+        expect(response.body.proof.type).to.eql('DataIntegrityProof')
+        expect(response.body.proof.cryptosuite).to.eql('eddsa-rdfc-2022')
+      })
+
+      it('injects the required data-integrity context when missing', async () => {
+        const credentials = Buffer.from(`${diTenant}:any`).toString('base64')
+        const sentCred = getUnsignedDIVC()
+        expect(sentCred['@context']).to.not.include(dataIntegrityContext)
+
+        const response = await request(app)
+          .post(issuePath)
+          .set('Authorization', `Basic ${credentials}`)
+          .send({ credential: sentCred })
+
+        expect(response.status).to.eql(200)
+        expect(response.body['@context']).to.include(dataIntegrityContext)
+      })
+
+      it('does not duplicate an already-present required context', async () => {
+        const credentials = Buffer.from(`${diTenant}:any`).toString('base64')
+        const sentCred = getUnsignedDIVC()
+        sentCred['@context'].push(dataIntegrityContext)
+
+        const response = await request(app)
+          .post(issuePath)
+          .set('Authorization', `Basic ${credentials}`)
+          .send({ credential: sentCred })
+
+        expect(response.status).to.eql(200)
+        const occurrences = response.body['@context'].filter(
+          (ctx) => ctx === dataIntegrityContext
+        )
+        expect(occurrences).to.have.lengthOf(1)
+      })
+    })
+
     it('returns 400 if credential property is missing', async () => {
       const credentials = Buffer.from(`${authedTenant}:${testToken}`).toString(
         'base64'

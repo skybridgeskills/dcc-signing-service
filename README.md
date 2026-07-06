@@ -525,10 +525,14 @@ The service also supports the VCALM (Verifiable Credentials API for Learner Reco
 
 This endpoint follows the VCALM specification for issuing credentials. The tenant is **not** in the URL; it is determined from `Authorization`.
 
-**Authentication (required):**
+**Authentication:**
 
-- **Basic Auth**: `Authorization: Basic <base64(username:password)>` where `username` is the tenant name (same as the legacy path segment, case-insensitive). If `TENANT_AUTH_TOKEN_{TENANT_NAME}` is set, `password` must match it; if not set, any password is accepted once the tenant exists.
-- **Bearer Token**: `Authorization: Bearer <token>` where `<token>` equals that tenant's `TENANT_AUTH_TOKEN_{TENANT_NAME}`. The service maps the token to a tenant internally; **use a distinct token per tenant.**
+An `Authorization` header is always required. Whether a valid secret is required depends on the tenant:
+
+- **Basic Auth**: `Authorization: Basic <base64(username:password)>` where `username` is the tenant name (same as the legacy path segment, case-insensitive). If `TENANT_AUTH_TOKEN_{TENANT_NAME}` is set, `password` must match it exactly. If it is **not** set, the tenant is **open** on `/credentials/issue`: **any** password is accepted once the tenant name matches. This tokenless mode is intentional (it preserves frictionless local/dev use), so setting a token is what actually gates a tenant behind authentication. The three default tenants (`test`, `testing`, `random`) ship without tokens and are therefore open. On config load, the service logs a consolidated `[auth]` warning listing every tokenless (open) tenant.
+- **Bearer Token**: `Authorization: Bearer <token>` where `<token>` equals that tenant's `TENANT_AUTH_TOKEN_{TENANT_NAME}`. The service maps the token to a tenant internally; **use a distinct token per tenant.** If two tenants share a token, only one wins the reverse lookup and the service logs an `[auth]` warning at config load.
+
+See the [tokenless-auth-policy ADR](docs/adr/2026-07-06-credentials-issue-tokenless-auth-policy.md) for the rationale behind keeping tokenless tenants open rather than fail-closed.
 
 **Headers:**
 
