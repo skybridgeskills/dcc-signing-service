@@ -1,5 +1,5 @@
 import { expect } from 'chai'
-import { resetConfig, getTenantSeed } from './config.js'
+import { resetConfig, getTenantSeed, getTenantByToken } from './config.js'
 
 const tenantName = 'configtest'
 
@@ -12,6 +12,8 @@ describe('Config', () => {
     resetConfig()
     delete process.env[`TENANT_SEED_${tenantName}`]
     delete process.env[`TENANT_DIDMETHOD_${tenantName}`]
+    delete process.env[`TENANT_CRYPTOSUITE_${tenantName}`]
+    delete process.env[`TENANT_AUTH_TOKEN_${tenantName}`]
   })
 
   afterEach(async () => {})
@@ -38,6 +40,49 @@ describe('Config', () => {
       process.env[`TENANT_DIDMETHOD_${tenantName}`] = 'web'
       const seed = await getTenantSeed('configtest')
       expect(seed.didMethod).to.eql('web')
+    })
+  })
+
+  describe('Cryptosuite', () => {
+    it('defaults to undefined (legacy)', async () => {
+      process.env[`TENANT_SEED_${tenantName}`] =
+        'z1AeiPT496wWmo9BG2QYXeTusgFSZPNG3T9wNeTtjrQ3rCB'
+      const seed = await getTenantSeed('configtest')
+      expect(seed.cryptosuite).to.be.undefined
+    })
+
+    it('reads eddsa-rdfc-2022 cryptosuite', async () => {
+      process.env[`TENANT_SEED_${tenantName}`] =
+        'z1AeiPT496wWmo9BG2QYXeTusgFSZPNG3T9wNeTtjrQ3rCB'
+      process.env[`TENANT_CRYPTOSUITE_${tenantName}`] = 'eddsa-rdfc-2022'
+      const seed = await getTenantSeed('configtest')
+      expect(seed.cryptosuite).to.eql('eddsa-rdfc-2022')
+    })
+  })
+
+  describe('Auth Token', () => {
+    it('defaults to undefined', async () => {
+      process.env[`TENANT_SEED_${tenantName}`] =
+        'z1AeiPT496wWmo9BG2QYXeTusgFSZPNG3T9wNeTtjrQ3rCB'
+      const seed = await getTenantSeed('configtest')
+      expect(seed.authToken).to.be.undefined
+    })
+
+    it('reads auth token', async () => {
+      process.env[`TENANT_SEED_${tenantName}`] =
+        'z1AeiPT496wWmo9BG2QYXeTusgFSZPNG3T9wNeTtjrQ3rCB'
+      process.env[`TENANT_AUTH_TOKEN_${tenantName}`] = 'mysecrettoken'
+      const seed = await getTenantSeed('configtest')
+      expect(seed.authToken).to.eql('mysecrettoken')
+    })
+
+    it('maps Bearer token to tenant name after load', async () => {
+      process.env[`TENANT_SEED_${tenantName}`] =
+        'z1AeiPT496wWmo9BG2QYXeTusgFSZPNG3T9wNeTtjrQ3rCB'
+      process.env[`TENANT_AUTH_TOKEN_${tenantName}`] = 'tok-configtest'
+      await getTenantSeed('configtest')
+      expect(getTenantByToken('tok-configtest')).to.eql('configtest')
+      expect(getTenantByToken('unknown')).to.be.null
     })
   })
 

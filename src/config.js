@@ -16,6 +16,28 @@ export const SECOND_TEST_TENANT_NAME = 'test'
 const randomTenantName = 'random'
 let DID_SEEDS = {}
 
+/** Maps TENANT_AUTH_TOKEN value -> tenant name (for Bearer auth on /credentials/issue). */
+const TOKEN_TO_TENANT = new Map()
+
+function rebuildTokenToTenantMap() {
+  TOKEN_TO_TENANT.clear()
+  for (const [name, cfg] of Object.entries(DID_SEEDS)) {
+    if (cfg && typeof cfg === 'object' && cfg.authToken) {
+      TOKEN_TO_TENANT.set(cfg.authToken, name)
+    }
+  }
+}
+
+/**
+ * Returns the tenant name for a configured auth token, or null.
+ *
+ * @param {string} token - Bearer token value
+ * @returns {string|null}
+ */
+export function getTenantByToken(token) {
+  return TOKEN_TO_TENANT.get(token) ?? null
+}
+
 async function getTenantsFromAwsSecretsManager() {
   if (!process.env.TENANTS_AWS_SECRETS) {
     return null
@@ -86,7 +108,9 @@ async function getTenantsFromAwsSecretsManager() {
       validTenants.push({
         name: tenantName,
         didSeed: secretData.seed,
-        didMethod: 'key' // Default to 'key' method
+        didMethod: 'key', // Default to 'key' method
+        cryptosuite: secretData.cryptosuite,
+        authToken: secretData.authToken
       })
     }
 
@@ -107,7 +131,9 @@ export async function fetchAndUpdateTenantSeeds() {
     for (const tenant of tenants) {
       DID_SEEDS[tenant.name] = {
         didSeed: await decodeSeed(tenant.didSeed),
-        didMethod: 'key'
+        didMethod: 'key',
+        cryptosuite: tenant.cryptosuite,
+        authToken: tenant.authToken
       }
     }
     // add in the default test key now, so it can be overridden by env
@@ -120,6 +146,7 @@ export async function fetchAndUpdateTenantSeeds() {
       didSeed: await decodeSeed(testSeed),
       didMethod: 'key'
     }
+    rebuildTokenToTenantMap()
     return // Skip the environment variable processing if tenants were loaded from URL
   }
 
@@ -155,9 +182,12 @@ export async function fetchAndUpdateTenantSeeds() {
         process.env[`TENANT_DIDMETHOD_${tenant}`].toLowerCase() === 'web'
           ? 'web'
           : 'key',
-      didUrl: process.env[`TENANT_DID_URL_${tenant}`]
+      didUrl: process.env[`TENANT_DID_URL_${tenant}`],
+      cryptosuite: process.env[`TENANT_CRYPTOSUITE_${tenant}`],
+      authToken: process.env[`TENANT_AUTH_TOKEN_${tenant}`]
     }
   }
+  rebuildTokenToTenantMap()
 }
 
 function parseConfig() {
@@ -185,17 +215,26 @@ export function getConfig() {
 export function resetConfig() {
   CONFIG = null
   DID_SEEDS = {}
+  TOKEN_TO_TENANT.clear()
 }
 
 /* for testing, to allow testing broken calls */
 export async function deleteSeed(tenantName) {
   delete DID_SEEDS[tenantName]
+  rebuildTokenToTenantMap()
 }
 
-export async function getTenantSeed(tenantName) {
+/**
+ * Loads tenant seeds from env / AWS if not already loaded (e.g. before Bearer token lookup).
+ */
+export async function ensureTenantSeedsLoaded() {
   if (!Object.keys(DID_SEEDS).length) {
     await fetchAndUpdateTenantSeeds()
   }
+}
+
+export async function getTenantSeed(tenantName) {
+  await ensureTenantSeedsLoaded()
   return DID_SEEDS[tenantName] ?? null
 }
 

@@ -169,6 +169,187 @@ describe('api', () => {
     })
   })
 
+  describe('POST /credentials/issue (VCALM)', () => {
+    const testToken = 'testsecret123'
+    const authedTenant = 'authedtest'
+    const issuePath = '/credentials/issue'
+
+    beforeEach(() => {
+      resetConfig()
+      process.env[`TENANT_SEED_${authedTenant}`] =
+        'z1AeiPT496wWmo9BG2QYXeTusgFSZPNG3T9wNeTtjrQ3rCB'
+      process.env[`TENANT_AUTH_TOKEN_${authedTenant}`] = testToken
+      clearIssuerInstances()
+    })
+
+    afterEach(() => {
+      delete process.env[`TENANT_SEED_${authedTenant}`]
+      delete process.env[`TENANT_AUTH_TOKEN_${authedTenant}`]
+    })
+
+    it('returns 401 if no authorization header', async () => {
+      const response = await request(app)
+        .post(issuePath)
+        .send({ credential: getUnsignedVC() })
+
+      expect(response.status).to.eql(401)
+    })
+
+    it('returns 401 with invalid Bearer token', async () => {
+      const response = await request(app)
+        .post(issuePath)
+        .set('Authorization', 'Bearer wrongtoken')
+        .send({ credential: getUnsignedVC() })
+
+      expect(response.status).to.eql(401)
+    })
+
+    it('returns 200 with valid Bearer token', async () => {
+      const sentCred = getUnsignedVCWithStatus()
+      const response = await request(app)
+        .post(issuePath)
+        .set('Authorization', `Bearer ${testToken}`)
+        .send({ credential: sentCred })
+
+      expect(response.header['content-type']).to.have.string('json')
+      expect(response.status).to.eql(200)
+      expect(response.body.proof.type).to.eql('Ed25519Signature2020')
+    })
+
+    it('returns 404 when Basic username is an unknown tenant', async () => {
+      const credentials = Buffer.from(`wrongtenant:${testToken}`).toString(
+        'base64'
+      )
+      const response = await request(app)
+        .post(issuePath)
+        .set('Authorization', `Basic ${credentials}`)
+        .send({ credential: getUnsignedVC() })
+
+      expect(response.status).to.eql(404)
+    })
+
+    it('returns 401 with wrong password in Basic Auth', async () => {
+      const credentials = Buffer.from(`${authedTenant}:wrongpassword`).toString(
+        'base64'
+      )
+      const response = await request(app)
+        .post(issuePath)
+        .set('Authorization', `Basic ${credentials}`)
+        .send({ credential: getUnsignedVC() })
+
+      expect(response.status).to.eql(401)
+    })
+
+    it('returns 200 with valid Basic Auth', async () => {
+      const sentCred = getUnsignedVCWithStatus()
+      const credentials = Buffer.from(`${authedTenant}:${testToken}`).toString(
+        'base64'
+      )
+      const response = await request(app)
+        .post(issuePath)
+        .set('Authorization', `Basic ${credentials}`)
+        .send({ credential: sentCred })
+
+      expect(response.header['content-type']).to.have.string('json')
+      expect(response.status).to.eql(200)
+      expect(response.body.proof.type).to.eql('Ed25519Signature2020')
+    })
+
+    it('returns 400 if credential property is missing', async () => {
+      const credentials = Buffer.from(`${authedTenant}:${testToken}`).toString(
+        'base64'
+      )
+      const response = await request(app)
+        .post(issuePath)
+        .set('Authorization', `Basic ${credentials}`)
+        .send({}) // No credential property
+
+      expect(response.status).to.eql(400)
+    })
+
+    it('returns 200 for tenant without authToken using Basic Auth (password ignored)', async () => {
+      const noAuthTenant = 'testing' // Default tenant with no auth token
+      const sentCred = getUnsignedVCWithStatus()
+      const credentials = Buffer.from(`${noAuthTenant}:any`).toString('base64')
+      const response = await request(app)
+        .post(issuePath)
+        .set('Authorization', `Basic ${credentials}`)
+        .send({ credential: sentCred })
+
+      expect(response.header['content-type']).to.have.string('json')
+      expect(response.status).to.eql(200)
+      expect(response.body.proof.type).to.eql('Ed25519Signature2020')
+    })
+
+    it('returns 404 for non-existent tenant (Basic Auth)', async () => {
+      const credentials = Buffer.from('nonexistenttenant:sometoken').toString(
+        'base64'
+      )
+      const response = await request(app)
+        .post(issuePath)
+        .set('Authorization', `Basic ${credentials}`)
+        .send({ credential: getUnsignedVC() })
+
+      expect(response.status).to.eql(404)
+    })
+
+    it('returns 401 with malformed Basic Auth (missing encoded part)', async () => {
+      const response = await request(app)
+        .post(issuePath)
+        .set('Authorization', 'Basic ') // Missing encoded part
+        .send({ credential: getUnsignedVC() })
+
+      expect(response.status).to.eql(401)
+    })
+
+    it('returns 401 with Basic Auth missing username', async () => {
+      const credentials = Buffer.from(`:${testToken}`).toString('base64') // Empty username
+      const response = await request(app)
+        .post(issuePath)
+        .set('Authorization', `Basic ${credentials}`)
+        .send({ credential: getUnsignedVC() })
+
+      expect(response.status).to.eql(401)
+    })
+
+    it('returns 401 with Basic Auth missing password', async () => {
+      const credentials = Buffer.from(`${authedTenant}:`).toString('base64') // Empty password
+      const response = await request(app)
+        .post(issuePath)
+        .set('Authorization', `Basic ${credentials}`)
+        .send({ credential: getUnsignedVC() })
+
+      expect(response.status).to.eql(401)
+    })
+
+    it('returns 401 with invalid Bearer format (missing token)', async () => {
+      const response = await request(app)
+        .post(issuePath)
+        .set('Authorization', 'Bearer ') // Missing token
+        .send({ credential: getUnsignedVC() })
+
+      expect(response.status).to.eql(401)
+    })
+
+    it('returns 401 with unknown authorization scheme', async () => {
+      const response = await request(app)
+        .post(issuePath)
+        .set('Authorization', 'Digest username=test') // Unknown scheme
+        .send({ credential: getUnsignedVC() })
+
+      expect(response.status).to.eql(401)
+    })
+
+    it('returns 401 with malformed Basic Auth (invalid base64)', async () => {
+      const response = await request(app)
+        .post(issuePath)
+        .set('Authorization', 'Basic not-valid-base64!!!') // Invalid base64
+        .send({ credential: getUnsignedVC() })
+
+      expect(response.status).to.eql(401)
+    })
+  })
+
   describe('DID:web', () => {
     const tenantName = 'apptest'
 

@@ -8,7 +8,7 @@
     "dev-noenv": "nodemon server.js",
     "lint": "eslint .  --ext .js",
     "lint-fix": "eslint --fix .  --ext .js",
-    "test": "NODE_OPTIONS=--experimental-vm-modules npx c8 mocha --timeout 10000 -r dotenv/config dotenv_config_path=src/test-fixtures/.env.testing src/*.test.js",
+    "test": "NODE_OPTIONS=--experimental-vm-modules npx c8 mocha --timeout 10000 -r dotenv/config dotenv_config_path=src/test-fixtures/.env.testing src/*.test.js src/**/*.test.js",
     "coveralls": "npm run test; c8 report --reporter=text-lcov | coveralls",
     "prepare": "test -d node_modules/husky && husky install || echo \"husky is not installed\"",
     "test:health": "node -r dotenv/config healthcheck.js dotenv_config_path=./.env.healthcheck.testing "
@@ -16,7 +16,9 @@
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.0.0",
     "@digitalbazaar/cborld": "^7.1.2",
+    "@digitalbazaar/data-integrity": "^2.5.0",
     "@digitalbazaar/did-method-key": "^5.2.0",
+    "@digitalbazaar/eddsa-rdfc-2022-cryptosuite": "^1.2.0",
     "@digitalbazaar/ed25519-signature-2020": "^5.4.0",
     "@digitalbazaar/ed25519-verification-key-2020": "^4.1.0",
     "@digitalbazaar/vc": "^7.0.0",
