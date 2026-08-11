@@ -28,3 +28,27 @@ export function getRequiredContexts() {
 export function getProofType() {
   return 'Ed25519Signature2020'
 }
+
+/**
+ * Returns the verification method `type` a published DID document should give
+ * the signing key when this suite is in use.
+ *
+ * Distinct from `getRequiredContexts` on purpose: that one returns *credential*
+ * contexts, and reusing it here would put credential vocabulary in a DID
+ * document. See `getDidDocumentContext` below.
+ *
+ * @returns {string} The verification method type
+ */
+export function getVerificationMethodType() {
+  return 'Ed25519VerificationKey2020'
+}
+
+/**
+ * Returns the JSON-LD context that defines this suite's verification method
+ * type, for inclusion in a published DID document (never in a credential).
+ *
+ * @returns {string} The DID document context URL
+ */
+export function getDidDocumentContext() {
+  return 'https://w3id.org/security/suites/ed25519-2020/v1'
+}

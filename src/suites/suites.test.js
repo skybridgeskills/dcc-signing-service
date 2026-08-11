@@ -25,6 +25,17 @@ describe('Suites', () => {
         expect(proofType).to.eql('Ed25519Signature2020')
       })
     })
+
+    describe('DID document facts', () => {
+      it('types a published verification method Ed25519VerificationKey2020', () => {
+        expect(Ed25519Signature2020Suite.getVerificationMethodType()).to.eql(
+          'Ed25519VerificationKey2020'
+        )
+        expect(Ed25519Signature2020Suite.getDidDocumentContext()).to.eql(
+          'https://w3id.org/security/suites/ed25519-2020/v1'
+        )
+      })
+    })
   })
 
   describe('EddsaRdfc2022Suite', () => {
@@ -46,6 +57,25 @@ describe('Suites', () => {
         const proofType = EddsaRdfc2022Suite.getProofType()
 
         expect(proofType).to.eql('DataIntegrityProof')
+      })
+    })
+
+    describe('DID document facts', () => {
+      it('types a published verification method Multikey', () => {
+        expect(EddsaRdfc2022Suite.getVerificationMethodType()).to.eql(
+          'Multikey'
+        )
+        expect(EddsaRdfc2022Suite.getDidDocumentContext()).to.eql(
+          'https://w3id.org/security/multikey/v1'
+        )
+      })
+
+      it('does not return a credential context', () => {
+        // The trap this pair exists to avoid: `getRequiredContexts` returns
+        // *credential* contexts and has nothing to do with a DID document.
+        expect(EddsaRdfc2022Suite.getRequiredContexts()).to.not.include(
+          EddsaRdfc2022Suite.getDidDocumentContext()
+        )
       })
     })
   })

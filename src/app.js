@@ -9,6 +9,7 @@ import errorLogger from './middleware/errorLogger.js'
 import invalidPathHandler from './middleware/invalidPathHandler.js'
 import { authenticateAndIdentifyTenant } from './middleware/auth.js'
 import SigningException from './SigningException.js'
+import { getTenantDidDocument } from './didWeb.js'
 import { getUnsignedVC } from './test-fixtures/vc.js'
 import { TEST_TENANT_NAME, fetchAndUpdateTenantSeeds } from './config.js'
 
@@ -84,6 +85,38 @@ export async function build() {
       }
     }
   )
+
+  /**
+   * Publish a `did:web` tenant's DID document.
+   *
+   * Deliberately unauthenticated: a DID document is public by definition — it
+   * is the thing every verifier on earth is expected to fetch — and it carries
+   * only public key material. The tenant name is already in the URL the caller
+   * constructed, so the 404 for a `did:key` tenant leaks nothing either.
+   *
+   * The bytes are derived from the tenant's seed on every request rather than
+   * stored anywhere (see `didWeb.js`), so the published document cannot drift
+   * from the key that signs. That is the whole reason this endpoint exists
+   * instead of a checked-in `did.json`. The driver's output is re-expressed in
+   * the conventional shape on the way out — a move, never a re-composition;
+   * see `normaliseDidDocument`.
+   *
+   * `dcc-transaction-service` proxies this at the identifier's own URL, since
+   * the authority in `did:web:<host>:...` is the tunnelled host it answers on,
+   * not this service.
+   */
+  app.get('/instance/:instanceId/did.json', async (req, res, next) => {
+    try {
+      const didDocument = await getTenantDidDocument(req.params.instanceId)
+      // A plain DID document, no envelope: the caller is a DID resolver (or a
+      // proxy in front of one) and anything wrapping it would have to be
+      // unwrapped by every one of them.
+      res.type('application/json')
+      return res.json(didDocument)
+    } catch (e) {
+      next(e)
+    }
+  })
 
   app.get('/refresh-seeds', async (_, res) => {
     await fetchAndUpdateTenantSeeds()

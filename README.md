@@ -16,6 +16,10 @@ IMPORTANT NOTE ABOUT VERSIONING: If you are using a Docker Hub image of this rep
   - [DID Registries](#did-registries)
   - [did:key](#didkey)
   - [did:web](#didweb)
+    - [Configuring a did:web tenant](#configuring-a-didweb-tenant)
+    - [Publishing the DID document](#publishing-the-did-document)
+      - [The published shape](#the-published-shape)
+    - [ecdsa-rdfc-2019 is did:key only](#ecdsa-rdfc-2019-is-didkey-only)
   - [Revocation](#revocation)
 - [Usage](#usage)
   - [Sign a credential](#sign-a-credential)
@@ -33,7 +37,7 @@ IMPORTANT NOTE ABOUT VERSIONING: If you are using a Docker Hub image of this rep
 
 Use this express server to sign [Verifiable Credentials](https://www.w3.org/TR/vc-data-model/). NEW: as of version 1.0.0 the signing-service works with both version 1 and version 2 Verifiable Credentials.
 
-Implements five http endpoints:
+Implements six http endpoints:
 
 - POST /instance/:instanceId/credentials/sign
 
@@ -50,6 +54,10 @@ Which is a convenience method for generating a new signing key, encoded as a [De
 - POST /did-web-generator
 
 Which is a convenience method for generating a new signing key, encoded as a [Decentralized Identifier (DID)](https://www.w3.org/TR/did-core/), specifically using the [did:web method](https://w3c-ccg.github.io/did-method-web/). Read about how to use it in the [did:web generator section](#didweb-generator).
+
+- GET /instance/:instanceId/did.json
+
+Which publishes a `did:web` tenant's DID document, **derived** on every request from that tenant's configured seed and `TENANT_DID_URL_{TENANT_NAME}` — so it cannot disagree with the key that signs. The key is published under `verificationMethod` and referenced by fragment from `assertionMethod` and `authentication`, with a type matching the tenant's cryptosuite. Unauthenticated, because a DID document is public by definition. Returns 404 for a `did:key` tenant, which has no document to host. Read more in the [Publishing the DID document](#publishing-the-did-document) section.
 
 - GET /healthz
 
@@ -323,23 +331,30 @@ So, that curl command will return a document something like so:
     "didDocument": {
         "@context": [
             "https://www.w3.org/ns/did/v1",
-            "https://w3id.org/security/suites/ed25519-2020/v1",
-            "https://w3id.org/security/suites/x25519-2020/v1"
+            "https://w3id.org/security/suites/ed25519-2020/v1"
         ],
         "id": "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main",
-        "assertionMethod": [
+        "verificationMethod": [
             {
                 "id": "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main#z6MkfGZKFTyxiH9HgFUHbPQigEWh8PtFaRkESt9oQLiTvhVq",
                 "type": "Ed25519VerificationKey2020",
                 "controller": "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main",
                 "publicKeyMultibase": "z6MkfGZKFTyxiH9HgFUHbPQigEWh8PtFaRkESt9oQLiTvhVq"
             }
+        ],
+        "assertionMethod": [
+            "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main#z6MkfGZKFTyxiH9HgFUHbPQigEWh8PtFaRkESt9oQLiTvhVq"
+        ],
+        "authentication": [
+            "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main#z6MkfGZKFTyxiH9HgFUHbPQigEWh8PtFaRkESt9oQLiTvhVq"
         ]
     }
 }
 ```
 
 </details>
+
+The generator has no tenant, so it has no configured cryptosuite: it previews the **default** suite's shape (`Ed25519VerificationKey2020`). A tenant configured with `TENANT_CRYPTOSUITE_{TENANT_NAME}=eddsa-rdfc-2022` publishes the same key with type `Multikey` — see [the published shape](#the-published-shape). The key and the `#fragment` are identical either way.
 
 Again, as with a did:key, you'll need to set the `seed` and register the `did`, as described in the prior [did:key generator](#didkey-generator) section.
 
@@ -349,22 +364,31 @@ You will additionally need to copy the value of the didDocument property, i.e, f
 {
   "@context": [
     "https://www.w3.org/ns/did/v1",
-    "https://w3id.org/security/suites/ed25519-2020/v1",
-    "https://w3id.org/security/suites/x25519-2020/v1"
+    "https://w3id.org/security/suites/ed25519-2020/v1"
   ],
   "id": "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main",
-  "assertionMethod": [
+  "verificationMethod": [
     {
       "id": "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main#z6MkfGZKFTyxiH9HgFUHbPQigEWh8PtFaRkESt9oQLiTvhVq",
       "type": "Ed25519VerificationKey2020",
       "controller": "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main",
       "publicKeyMultibase": "z6MkfGZKFTyxiH9HgFUHbPQigEWh8PtFaRkESt9oQLiTvhVq"
     }
+  ],
+  "assertionMethod": [
+    "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main#z6MkfGZKFTyxiH9HgFUHbPQigEWh8PtFaRkESt9oQLiTvhVq"
+  ],
+  "authentication": [
+    "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main#z6MkfGZKFTyxiH9HgFUHbPQigEWh8PtFaRkESt9oQLiTvhVq"
   ]
 }
 ```
 
-and save that in a file called did.json at the url where you'll host the document. So for our example at:
+If you hand-copy this for an external host, copy it for the suite that tenant is configured with — a hand-copied document is exactly the thing that drifts.
+
+**Prefer [`GET /instance/:instanceId/did.json`](#publishing-the-did-document) over copying the document by hand.** Copying is only necessary when the DID's host is somewhere this service cannot be reached from, such as a GitHub Pages repository. Every copy is a value that can drift from the seed it came from, and one of ours did.
+
+If you do need the copy, save the `didDocument` above in a file called did.json at the url where you'll host the document. So for our example at:
 
 `https://raw.githubusercontent.com/jchartrand/didWebTest/main/.well-known/did.json`
 
@@ -390,7 +414,93 @@ The issuer is by default set up to use the did:key implemenation of a [DID](http
 
 The did:web implementation is preferable for production becuase it allows you to rotate (change) your signing keys whithout having to update every document that points at the old keys.
 
-To use it set `TENANT_DIDMETHOD_{TENANT_NAME}=web` and set `TENANT_DID_URL_{TENANT_NAME}` to the url where your `.well-known/did.json` did-document is hosted.
+#### Configuring a did:web tenant
+
+Three environment variables, all per-tenant, all optional in general and all required together for did:web:
+
+```
+TENANT_SEED_CCP-D1=z1AeiPT496wWmo9BG2QYXeTusgFSZPNG3T9wNeTtjrQ3rCB
+TENANT_DIDMETHOD_CCP-D1=web
+TENANT_DID_URL_CCP-D1=https://lit-exchanges.ngrok.io/ui/ccp-d1
+TENANT_CRYPTOSUITE_CCP-D1=eddsa-rdfc-2022
+```
+
+| Variable | Effect |
+| --- | --- |
+| `TENANT_DIDMETHOD_{TENANT_NAME}` | `web` selects did:web for this tenant. Anything else (including unset) means `key`. |
+| `TENANT_DID_URL_{TENANT_NAME}` | The URL the DID document is published at, **without** the trailing `/did.json`. Determines the DID: the URL above yields `did:web:lit-exchanges.ngrok.io:ui:ccp-d1`. |
+| `TENANT_CRYPTOSUITE_{TENANT_NAME}` | `eddsa-rdfc-2022` for a `DataIntegrityProof`; omit for the legacy `Ed25519Signature2020`. `ecdsa-rdfc-2019` is **not** available with did:web — see below. For did:web this also selects the **verification method type in the published document** — see [the published shape](#the-published-shape). |
+
+These have always been read (`src/config.js`), but they were thinly documented, and that is how the incident in the next section happened. Both `Ed25519Signature2020` and `eddsa-rdfc-2022` work with did:web.
+
+#### Publishing the DID document
+
+A did:web DID only resolves if a document is served at the identifier's own URL — for the tenant above, `https://lit-exchanges.ngrok.io/ui/ccp-d1/did.json`.
+
+**Do not hand-copy the document there.** The [did:web generator](#didweb-generator) section describes copying the `didDocument` property into a file, which works and is what an external host like GitHub Pages needs, but it produces a hand-maintained copy of a value that is otherwise derived. We shipped exactly that copy once, it drifted from the configured seed, and the published issuer identifier and the actual signing key disagreed for an entire milestone because nothing ever compared them.
+
+So this service publishes the real thing:
+
+```
+GET /instance/:instanceId/did.json
+```
+
+```
+curl localhost:4006/instance/ccp-d1/did.json
+```
+
+- The document is **derived on every request** from the same seed and URL, through the same driver call, that produce the signing key. There is no stored copy and no way to override it, so "issuer says one thing, key says another" cannot be represented.
+- **No authentication.** A DID document is public by definition and carries only public key material.
+- **404 for a `did:key` tenant** (nothing to host) or an unknown tenant. The tenant name is already in the URL the caller constructed, so the two are not distinguished.
+- Returns a plain DID document with `Content-Type: application/json` — no envelope, because the caller is a DID resolver.
+
+##### The published shape
+
+```json
+{
+  "@context": [
+    "https://www.w3.org/ns/did/v1",
+    "https://w3id.org/security/multikey/v1"
+  ],
+  "id": "did:web:lit-exchanges.ngrok.io:ui:ccp-d1",
+  "verificationMethod": [
+    {
+      "id": "did:web:lit-exchanges.ngrok.io:ui:ccp-d1#z6MkfZN9…",
+      "type": "Multikey",
+      "controller": "did:web:lit-exchanges.ngrok.io:ui:ccp-d1",
+      "publicKeyMultibase": "z6MkfZN9…"
+    }
+  ],
+  "assertionMethod": ["did:web:lit-exchanges.ngrok.io:ui:ccp-d1#z6MkfZN9…"],
+  "authentication": ["did:web:lit-exchanges.ngrok.io:ui:ccp-d1#z6MkfZN9…"]
+}
+```
+
+The verification method's `type` and the second `@context` entry follow the tenant's `TENANT_CRYPTOSUITE_{TENANT_NAME}`, because the document has to describe the key the way the proof will reference it:
+
+| `TENANT_CRYPTOSUITE_{TENANT_NAME}` | Verification method `type` | Second `@context` entry |
+| --- | --- | --- |
+| *(unset)* / `Ed25519Signature2020` | `Ed25519VerificationKey2020` | `https://w3id.org/security/suites/ed25519-2020/v1` |
+| `eddsa-rdfc-2022` | `Multikey` | `https://w3id.org/security/multikey/v1` |
+| `ecdsa-rdfc-2019` | — | refused, [see below](#ecdsa-rdfc-2019-is-didkey-only) |
+
+**The key, the `#fragment` and the DID do not change with the suite** — only the type and the context do. An already-issued credential's `proof.verificationMethod` keeps pointing at the published method.
+
+**This shape is normalised from the driver's output, not composed.** `@interop/did-web-resolver@5.0.0` returns a document that embeds the whole method inside `assertionMethod`, emits no top-level `verificationMethod` array, and declares an x25519 context it never backs with a `keyAgreement` key. That form is legal — DID Core §5.3.1 allows an embedded method — but a third-party wallet is entitled to reject it, and this service is used to test wallets, so a wallet's failure has to be the wallet's fault. `src/didWeb.js` therefore **moves** the method the driver produced into `verificationMethod`, references it by fragment from `assertionMethod` and `authentication`, drops the unused x25519 context, and substitutes the suite's `type`. It never builds a method out of separately-held key material: a document composed beside the signing path is the drift this endpoint exists to prevent. If the driver's output shape ever changes, the normaliser throws a 500 rather than serving a document with no key in it. See [`docs/adr/2026-08-11-did-web-document-normalisation.md`](docs/adr/2026-08-11-did-web-document-normalisation.md).
+
+Anything asserting on the published document should read `verificationMethod[0]`.
+
+If the host that answers on the DID's domain is not this service — it usually is not, since the signing service is normally not public — that host should proxy this endpoint rather than keep a copy. [`dcc-transaction-service`](https://github.com/skybridgeskills/dcc-transaction-service) does exactly this for the tunnelled host, deriving the path and the signing tenant from its own issuer-instance configuration.
+
+#### ecdsa-rdfc-2019 is did:key only
+
+`TENANT_CRYPTOSUITE_{TENANT_NAME}=ecdsa-rdfc-2019` together with `TENANT_DIDMETHOD_{TENANT_NAME}=web` is **refused**, both when signing and when publishing, with:
+
+> ecdsa-rdfc-2019 is supported for did:key only. The did:web driver cannot express a P-256 verification method, and issuing one would publish a DID document that misdescribes the key.
+
+This is deliberate, not a gap. The did:web driver composes a document whose `@context` is hardcoded to the Ed25519 and X25519 suite contexts — no Multikey, no data-integrity context — and it emits no verification method for an ECDSA key at all. Publishing a P-256 key inside that document would look fine here and fail, or worse verify ambiguously, at a relying party. Supporting it means composing the document ourselves or replacing the resolver. `ecdsa-rdfc-2019` with did:key works.
+
+Note that the normalisation described above does **not** open this door. It re-expresses a method the driver actually produced; for an `ecdsa-rdfc-2019` tenant the driver still produces an *Ed25519* key, so restyling the document would publish a key the tenant never signs with — the same mis-issuance, wearing a better-shaped document. Publication is refused before a suite is even selected.
 
 ## Usage
 

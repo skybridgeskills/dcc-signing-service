@@ -43,3 +43,32 @@ export function getRequiredContexts() {
 export function getProofType() {
   return 'DataIntegrityProof'
 }
+
+/**
+ * Returns the verification method `type` a published DID document should give
+ * the signing key when this suite is in use.
+ *
+ * Exported so the three suite modules present the same surface, but the
+ * published-document path never reaches it: `ecdsa-rdfc-2019` + `did:web` is
+ * refused before a suite is ever selected (`didWeb.js`, `issue.js`), and a
+ * `did:key` tenant has no document to host. It is the honest answer if
+ * something ever does ask.
+ *
+ * @returns {string} The verification method type
+ */
+export function getVerificationMethodType() {
+  return 'Multikey'
+}
+
+/**
+ * Returns the JSON-LD context that defines this suite's verification method
+ * type, for inclusion in a published DID document (never in a credential).
+ *
+ * Same caveat as `getVerificationMethodType`: unreachable from the did:web
+ * publication path, which refuses this suite.
+ *
+ * @returns {string} The DID document context URL
+ */
+export function getDidDocumentContext() {
+  return 'https://w3id.org/security/multikey/v1'
+}

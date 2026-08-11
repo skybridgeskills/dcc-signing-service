@@ -1,16 +1,13 @@
 import { Ed25519VerificationKey2020 } from '@digitalbazaar/ed25519-verification-key-2020'
 import * as Ed25519Multikey from '@digitalbazaar/ed25519-multikey'
-import { CryptoLD } from 'crypto-ld'
 import { driver as keyDriver } from '@digitalbazaar/did-method-key'
-import { driver as webDriver } from '@interop/did-web-resolver'
 import { securityLoader } from '@digitalcredentials/security-document-loader'
 import { getTenantSeed } from './config.js'
+import { didWebDriver, ECDSA_DID_WEB_REFUSAL } from './didWeb.js'
 import SigningException from './SigningException.js'
 import { issue as signVC } from '@digitalbazaar/vc'
 import * as EcdsaMultikey from '@digitalbazaar/ecdsa-multikey'
-import * as Ed25519Signature2020Suite from './suites/Ed25519Signature2020Suite.js'
-import * as EddsaRdfc2022Suite from './suites/EddsaRdfc2022Suite.js'
-import * as EcdsaRdfc2019Suite from './suites/EcdsaRdfc2019Suite.js'
+import selectSuite from './suites/selectSuite.js'
 
 /** P-256 curve name used for every ecdsa-rdfc-2019 key this service mints. */
 const ECDSA_CURVE = 'P-256'
@@ -18,12 +15,9 @@ const ECDSA_CURVE = 'P-256'
 let ISSUER_INSTANCES = {}
 const documentLoader = securityLoader().build()
 
-// Crypto library for linked data
-const cryptoLd = new CryptoLD()
-cryptoLd.use(Ed25519VerificationKey2020)
-
-// DID drivers
-const didWebDriver = webDriver({ cryptoLd })
+// DID drivers. `didWebDriver` is shared with `generate.js` and with the
+// `GET /instance/:instanceId/did.json` endpoint — the published document has to
+// come off the same driver as the signing key, or it is a copy again.
 const didKeyDriver = keyDriver()
 
 didKeyDriver.use({
@@ -99,24 +93,6 @@ const addIssuerId = (credential, issuerId) => {
 }
 
 /**
- * Selects the appropriate suite module based on cryptosuite configuration.
- *
- * @param {string} cryptosuite - The cryptosuite name (e.g., 'eddsa-rdfc-2022')
- * @returns {object} The suite module
- */
-const selectSuite = (cryptosuite) => {
-  switch (cryptosuite) {
-    case 'eddsa-rdfc-2022':
-      return EddsaRdfc2022Suite
-    case 'ecdsa-rdfc-2019':
-      return EcdsaRdfc2019Suite
-    default:
-      // Default to legacy Ed25519Signature2020
-      return Ed25519Signature2020Suite
-  }
-}
-
-/**
  * Injects any suite-required JSON-LD contexts into the credential, deduping
  * while preserving order and keeping caller-supplied contexts first.
  *
@@ -174,10 +150,11 @@ export async function getSigningMaterial({ method, seed, url, cryptosuite }) {
       // Supporting it means composing the document ourselves or replacing the
       // resolver — a larger change than adding a cryptosuite, and out of
       // scope until something needs it. did:key + ecdsa-rdfc-2019 works.
-      throw new SigningException(
-        400,
-        'ecdsa-rdfc-2019 is supported for did:key only. The did:web driver cannot express a P-256 verification method, and issuing one would publish a DID document that misdescribes the key.'
-      )
+      //
+      // The message lives in `didWeb.js` because the document endpoint refuses
+      // the same combination with the same words: a tenant that cannot sign
+      // must not have a key published on its behalf either.
+      throw new SigningException(400, ECDSA_DID_WEB_REFUSAL)
     }
     const keyPair = await EcdsaMultikey.generate({ curve: ECDSA_CURVE, seed })
     did = await didKeyDriver.fromKeyPair({ verificationKeyPair: keyPair })
