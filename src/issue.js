@@ -7,8 +7,13 @@ import { securityLoader } from '@digitalcredentials/security-document-loader'
 import { getTenantSeed } from './config.js'
 import SigningException from './SigningException.js'
 import { issue as signVC } from '@digitalbazaar/vc'
+import * as EcdsaMultikey from '@digitalbazaar/ecdsa-multikey'
 import * as Ed25519Signature2020Suite from './suites/Ed25519Signature2020Suite.js'
 import * as EddsaRdfc2022Suite from './suites/EddsaRdfc2022Suite.js'
+import * as EcdsaRdfc2019Suite from './suites/EcdsaRdfc2019Suite.js'
+
+/** P-256 curve name used for every ecdsa-rdfc-2019 key this service mints. */
+const ECDSA_CURVE = 'P-256'
 
 let ISSUER_INSTANCES = {}
 const documentLoader = securityLoader().build()
@@ -24,6 +29,14 @@ const didKeyDriver = keyDriver()
 didKeyDriver.use({
   multibaseMultikeyHeader: 'z6Mk',
   fromMultibase: Ed25519VerificationKey2020.from
+})
+
+// P-256 multikeys carry the `zDna` header. Without this the did:key driver
+// cannot express an ECDSA key at all, so ecdsa-rdfc-2019 could be selected
+// as a suite but never produce a usable issuer DID.
+didKeyDriver.use({
+  multibaseMultikeyHeader: 'zDna',
+  fromMultibase: EcdsaMultikey.from
 })
 
 /* FOR TESTING */
@@ -95,6 +108,8 @@ const selectSuite = (cryptosuite) => {
   switch (cryptosuite) {
     case 'eddsa-rdfc-2022':
       return EddsaRdfc2022Suite
+    case 'ecdsa-rdfc-2019':
+      return EcdsaRdfc2019Suite
     default:
       // Default to legacy Ed25519Signature2020
       return Ed25519Signature2020Suite
@@ -141,6 +156,42 @@ const buildIssuerInstance = async (seed, method, url, cryptosuite) => {
 
 export async function getSigningMaterial({ method, seed, url, cryptosuite }) {
   let did, key
+
+  // ECDSA needs a genuine P-256 key, not an Ed25519 one — a different curve,
+  // not a different wrapper around the same key. It is therefore generated
+  // here rather than derived from the Ed25519 material the other suites use,
+  // and both DID methods are served from the one branch.
+  if (cryptosuite === 'ecdsa-rdfc-2019') {
+    if (method === 'web') {
+      // Deliberately refused rather than mis-issued. The did:web driver
+      // composes a DID document whose @context is hardcoded to the Ed25519
+      // and X25519 suite contexts, with no Multikey / data-integrity context,
+      // and it does not emit a verification method for an ECDSA key at all.
+      // Publishing a P-256 key inside an Ed25519-context document would be a
+      // silent mis-issuance: it would look fine here and fail, or worse
+      // verify ambiguously, at a relying party.
+      //
+      // Supporting it means composing the document ourselves or replacing the
+      // resolver — a larger change than adding a cryptosuite, and out of
+      // scope until something needs it. did:key + ecdsa-rdfc-2019 works.
+      throw new SigningException(
+        400,
+        'ecdsa-rdfc-2019 is supported for did:key only. The did:web driver cannot express a P-256 verification method, and issuing one would publish a DID document that misdescribes the key.'
+      )
+    }
+    const keyPair = await EcdsaMultikey.generate({ curve: ECDSA_CURVE, seed })
+    did = await didKeyDriver.fromKeyPair({ verificationKeyPair: keyPair })
+    const assertionMethod = did.methodFor({ purpose: 'assertionMethod' })
+    key = await EcdsaMultikey.from({
+      type: 'Multikey',
+      id: assertionMethod.id,
+      controller: assertionMethod.controller,
+      publicKeyMultibase: assertionMethod.publicKeyMultibase,
+      secretKeyMultibase: keyPair.secretKeyMultibase
+    })
+    return { didDocument: did.didDocument, key }
+  }
+
   if (method === 'web') {
     did = await didWebDriver.generate({ seed, url })
     const assertionMethod = did.methodFor({ purpose: 'assertionMethod' })
