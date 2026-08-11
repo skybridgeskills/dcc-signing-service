@@ -143,7 +143,25 @@ export async function getSigningMaterial({ method, seed, url, cryptosuite }) {
   let did, key
   if (method === 'web') {
     did = await didWebDriver.generate({ seed, url })
-    key = did.methodFor({ purpose: 'assertionMethod' })
+    const assertionMethod = did.methodFor({ purpose: 'assertionMethod' })
+
+    // For eddsa-rdfc-2022, we need an Ed25519Multikey signer — same as the
+    // did:key branch below. The did:web driver hands back an
+    // Ed25519VerificationKey2020, whose signer reports no `algorithm`, and
+    // DataIntegrityProof rejects it with "The signer's algorithm 'undefined'
+    // does not match the required algorithm for the cryptosuite 'Ed25519'".
+    if (cryptosuite === 'eddsa-rdfc-2022') {
+      key = await Ed25519Multikey.from({
+        type: 'Multikey',
+        id: assertionMethod.id,
+        controller: assertionMethod.controller,
+        publicKeyMultibase: assertionMethod.publicKeyMultibase,
+        secretKeyMultibase: assertionMethod.privateKeyMultibase
+      })
+    } else {
+      // Legacy Ed25519Signature2020 uses the key object directly
+      key = assertionMethod
+    }
   } else {
     const verificationKeyPair = await Ed25519VerificationKey2020.generate({
       seed

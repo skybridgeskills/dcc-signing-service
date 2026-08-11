@@ -455,6 +455,56 @@ describe('api', () => {
     })
   })
 
+  describe('DID:web with eddsa-rdfc-2022', () => {
+    const tenantName = 'apptestdiweb'
+
+    // The did:web driver returns an Ed25519VerificationKey2020, whose signer
+    // reports no `algorithm`. Without a Multikey conversion DataIntegrityProof
+    // rejects it and every did:web + eddsa-rdfc-2022 tenant 500s, while the
+    // same tenant on the legacy suite signs fine.
+    const getUnsignedDIVC = () => ({
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      id: 'urn:uuid:0a5c4b3e-6d1f-4b0a-9a2f-7c8d4e1b9f30',
+      type: ['VerifiableCredential'],
+      issuer: 'did:example:placeholder',
+      validFrom: '2023-08-02T17:43:32.903Z',
+      credentialSubject: { id: 'did:example:subject', name: 'Jane Doe' }
+    })
+
+    before(() => {
+      resetConfig()
+      clearIssuerInstances()
+      process.env[`TENANT_SEED_${tenantName}`] =
+        'z1AeiPT496wWmo9BG2QYXeTusgFSZPNG3T9wNeTtjrQ3rCB'
+      process.env[`TENANT_DIDMETHOD_${tenantName}`] = 'web'
+      process.env[`TENANT_DID_URL_${tenantName}`] = 'https://example.com/ui/x'
+      process.env[`TENANT_CRYPTOSUITE_${tenantName}`] = 'eddsa-rdfc-2022'
+    })
+
+    after(() => {
+      delete process.env[`TENANT_SEED_${tenantName}`]
+      delete process.env[`TENANT_DIDMETHOD_${tenantName}`]
+      delete process.env[`TENANT_DID_URL_${tenantName}`]
+      delete process.env[`TENANT_CRYPTOSUITE_${tenantName}`]
+    })
+
+    it('issues a DataIntegrityProof from a path-form did:web tenant', async () => {
+      const response = await request(app)
+        .post(`/instance/${tenantName}/credentials/sign`)
+        .send(getUnsignedDIVC())
+
+      expect(response.status).to.eql(200)
+      expect(response.body.issuer.id ?? response.body.issuer).to.eql(
+        'did:web:example.com:ui:x'
+      )
+      expect(response.body.proof.type).to.eql('DataIntegrityProof')
+      expect(response.body.proof.cryptosuite).to.eql('eddsa-rdfc-2022')
+      expect(response.body.proof.verificationMethod).to.contain(
+        'did:web:example.com:ui:x#'
+      )
+    })
+  })
+
   describe('/did-web-generator', () => {
     it('returns a new did:web', async () => {
       await request(app)
