@@ -126,6 +126,29 @@ TENANT_SEED_DEGREES=z1AoLPRWHSKasPH1unbY1A6ZFF2Pdzzp7D2CkpK6YYYdKTN
 TENANT_SEED_ECON101=Z1genK82erz1AoLPRWHSKZFF2Pdzzp7D2CkpK6YYYdKTNat
 ```
 
+
+**Use a fixed seed for any tenant whose identity must be stable.** Setting a
+seed to `generate` mints a fresh key on every service start, so the tenant's
+issuer DID silently changes across restarts. Credentials issued either side of
+a restart then carry different issuers — harmless for verification, since
+`did:key` is self-describing, but confusing for anything that correlates
+credentials to an issuer over time (evaluation runs, status lists, audit
+trails). Generate a seed once via `/did-key-generator` and pin it.
+
+**Supported cryptosuites** (`TENANT_CRYPTOSUITE_{TENANT_NAME}`):
+
+| Value | Proof | DID methods |
+| --- | --- | --- |
+| *(unset)* | `Ed25519Signature2020` (legacy default) | `did:key`, `did:web` |
+| `eddsa-rdfc-2022` | `DataIntegrityProof` | `did:key`, `did:web` |
+| `ecdsa-rdfc-2019` | `DataIntegrityProof`, P-256 | **`did:key` only** — see below |
+
+`ecdsa-rdfc-2019` is refused for `did:web`. The did:web driver composes a DID
+document whose `@context` is hardcoded to the Ed25519/X25519 suite contexts and
+emits no verification method for an ECDSA key, so publishing a P-256 key there
+would misdescribe it to every relying party. Supporting it means composing the
+DID document ourselves or replacing the resolver.
+
 For the legacy sign endpoint, tenant names appear in the URL:
 
 ```
