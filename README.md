@@ -528,6 +528,58 @@ See how we do that in the [DCC issuer-coordinator](https://github.com/digitalcre
 
 Note that to run this with Docker, you'll of course need to install Docker, which is very easy with the [Docker installers for Windows, Mac, and Linux](https://docs.docker.com/engine/install/).
 
+### Sign an OID4VP request object
+
+```
+POST /instance/:instanceId/openid4vp/request-object/sign
+```
+
+⚠️ **This service signs something that is not a credential, and that is
+deliberate.** OID4VP §5.9.3's `decentralized_identifier` Client Identifier
+Prefix identifies a verifier by a DID, and the JOSE `kid` in its signed request
+object must name a key in that DID document's `verificationMethod`. **This
+service is the only component that derives both the published document and the
+signing key from one seed** — `didWeb.js` exists for precisely that invariant.
+Holding the key anywhere else would put the document and the key in different
+processes with nothing comparing them, which is [gap H1](#didweb) with a network
+in the middle.
+
+The body is the request object's claims; the response is a compact JWS served as
+`application/oauth-authz-req+jwt`, unwrapped, so the caller can serve those bytes
+verbatim at its `request_uri`.
+
+```
+curl --location 'http://localhost:4006/instance/test/openid4vp/request-object/sign' --header 'Content-Type: application/json' --data-raw '{"response_type":"vp_token","response_mode":"direct_post","client_id":"decentralized_identifier:did:web:example.com","nonce":"n","state":"s"}'
+```
+
+**What it signs with:** the tenant's existing seed. No new keys, no new tenants,
+no new DIDs. ⚠️ The DID is an **entity identity, not a role identity** — some
+organisations verify only, some issue only, and this service signs on behalf of
+the entity whatever it happens to be acting as. Do not let documentation call it
+"the issuer DID" in a verifier context.
+
+**The `kid`** is read from the tenant's published `did.json`, never composed from
+`did + '#' + something`. A composed `kid` would be a second statement about which
+key signs.
+
+⚠️ **The algorithm is EdDSA and it is forced, not chosen.** See
+[`ecdsa-rdfc-2019` is did:key only](#ecdsa-rdfc-2019-is-didkey-only): the
+`did:web` driver cannot express a P-256 verification method, so an ECDSA
+`did:web` tenant is refused here with the same shared message the signing and
+publication paths use. **ES256 is the de-facto default for OID4VP request-object
+signing in the mDL/EUDI world**, so a conformant signed arm may prove less
+interoperable than an unsigned one — that is a thing to measure, and no P-256
+path was added to pre-empt it.
+
+**Refusals are named, and there is no unsigned fallback.** An unknown tenant, a
+`did:key` tenant (it publishes no document at a URL), a refused suite, or an
+empty body each return a named error. ⚠️ An unsigned result from a *sign*
+endpoint would look like success, and the verifier separately serves a genuinely
+unsigned `alg: none` request object as a registered accommodation — the two must
+never be confusable.
+
+See [the ADR](docs/adr/2026-08-25-oid4vp-request-object-signing.md).
+
 ### Sign a credential
 
 Try it out with this CURL command, which you simply paste into the terminal (once you've got your issuer running on your computer, as described above):

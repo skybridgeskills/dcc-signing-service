@@ -10,6 +10,9 @@ import invalidPathHandler from './middleware/invalidPathHandler.js'
 import { authenticateAndIdentifyTenant } from './middleware/auth.js'
 import SigningException from './SigningException.js'
 import { getTenantDidDocument } from './didWeb.js'
+import signRequestObject, {
+  REQUEST_OBJECT_JWT_MEDIA_TYPE
+} from './signRequestObject.js'
 import { getUnsignedVC } from './test-fixtures/vc.js'
 import { TEST_TENANT_NAME, fetchAndUpdateTenantSeeds } from './config.js'
 
@@ -105,6 +108,31 @@ export async function build() {
    * the authority in `did:web:<host>:...` is the tunnelled host it answers on,
    * not this service.
    */
+  /**
+   * Sign an OID4VP authorization request object with a tenant's existing key.
+   *
+   * ⚠️ **Not a credential**, and deliberately in this service anyway: the
+   * `decentralized_identifier` Client Identifier Prefix needs the JOSE `kid` to
+   * name a key in the published DID document, and this is the only component
+   * that derives both from one seed. See `signRequestObject.js`.
+   *
+   * Returns the compact JWS as the body, not wrapped in JSON — the caller
+   * serves these bytes verbatim at its `request_uri`, and anything around them
+   * would have to be unwrapped first.
+   */
+  app.post(
+    '/instance/:instanceId/openid4vp/request-object/sign',
+    async (req, res, next) => {
+      try {
+        const jws = await signRequestObject(req.body, req.params.instanceId)
+        res.type(REQUEST_OBJECT_JWT_MEDIA_TYPE)
+        return res.send(jws)
+      } catch (e) {
+        next(e)
+      }
+    }
+  )
+
   app.get('/instance/:instanceId/did.json', async (req, res, next) => {
     try {
       const didDocument = await getTenantDidDocument(req.params.instanceId)
