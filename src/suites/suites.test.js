@@ -3,6 +3,7 @@ import * as Ed25519Signature2020Suite from './Ed25519Signature2020Suite.js'
 import * as EddsaRdfc2022Suite from './EddsaRdfc2022Suite.js'
 import * as EcdsaRdfc2019Suite from './EcdsaRdfc2019Suite.js'
 import { getSigningMaterial } from '../issue.js'
+import { generateEcdsaKeyMaterial } from '../keyMaterial.js'
 
 describe('Suites', () => {
   describe('Ed25519Signature2020Suite', () => {
@@ -97,14 +98,19 @@ describe('EcdsaRdfc2019Suite', () => {
 })
 
 describe('ecdsa-rdfc-2019 signing material', () => {
-  // A stable seed so the test asserts a deterministic DID method + curve
-  // rather than just "something was produced".
-  const seed = 'z1AZK4h5w5YZkKYEgqtcFfvSbWQ3tZ3ZFgmLsXMZsTVoeK7'
+  // Minted key material, not a seed: `EcdsaMultikey.generate` discards a seed,
+  // so P-256 material is persisted as both multibase halves. `keyMaterial.js`
+  // has the argument; `keyMaterial.test.js` asserts the round trip.
+  let keyMaterial
+
+  before(async () => {
+    keyMaterial = await generateEcdsaKeyMaterial()
+  })
 
   it('mints a P-256 did:key, not an Ed25519 one', async () => {
     const { didDocument, key } = await getSigningMaterial({
       method: 'key',
-      seed,
+      keyMaterial,
       cryptosuite: 'ecdsa-rdfc-2019'
     })
     // P-256 did:key carries the `zDna` multibase header; Ed25519 carries `z6Mk`.
@@ -119,7 +125,7 @@ describe('ecdsa-rdfc-2019 signing material', () => {
     try {
       await getSigningMaterial({
         method: 'web',
-        seed,
+        keyMaterial,
         url: 'https://example.com/issuers/ecdsa',
         cryptosuite: 'ecdsa-rdfc-2019'
       })

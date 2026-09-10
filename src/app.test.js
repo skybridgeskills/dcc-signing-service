@@ -4,6 +4,7 @@ import decodeSeed from './utils/decodeSeed.js'
 import { expect } from 'chai'
 import request from 'supertest'
 import { clearIssuerInstances, getSigningMaterial } from './issue.js'
+import { ed25519SeedMaterial, generateEcdsaKeyMaterial } from './keyMaterial.js'
 import {
   resetConfig,
   deleteSeed,
@@ -532,7 +533,7 @@ describe('api', () => {
       credentialSubject: { id: 'did:example:subject', name: 'Jane Doe' }
     })
 
-    before(() => {
+    before(async () => {
       resetConfig()
       clearIssuerInstances()
       process.env[`TENANT_SEED_${tenantName}`] = tenantSeed
@@ -540,8 +541,15 @@ describe('api', () => {
       process.env[`TENANT_DID_URL_${tenantName}`] = tenantUrl
       process.env[`TENANT_CRYPTOSUITE_${tenantName}`] = 'eddsa-rdfc-2022'
       // A did:web tenant on the refused suite, to prove the refusal holds at
-      // the publication boundary and not only at the signing one.
-      process.env[`TENANT_SEED_${ecdsaWebTenant}`] = tenantSeed
+      // the publication boundary and not only at the signing one. It carries
+      // minted key material rather than a seed because an ecdsa-rdfc-2019
+      // tenant declaring a seed is now refused at startup — the refusal under
+      // test here is the later one, about the DID method.
+      const ecdsaKeyMaterial = await generateEcdsaKeyMaterial()
+      process.env[`TENANT_KEY_PUBLIC_${ecdsaWebTenant}`] =
+        ecdsaKeyMaterial.publicKeyMultibase
+      process.env[`TENANT_KEY_SECRET_${ecdsaWebTenant}`] =
+        ecdsaKeyMaterial.secretKeyMultibase
       process.env[`TENANT_DIDMETHOD_${ecdsaWebTenant}`] = 'web'
       process.env[`TENANT_DID_URL_${ecdsaWebTenant}`] = tenantUrl
       process.env[`TENANT_CRYPTOSUITE_${ecdsaWebTenant}`] = 'ecdsa-rdfc-2019'
@@ -556,7 +564,8 @@ describe('api', () => {
       delete process.env[`TENANT_DIDMETHOD_${tenantName}`]
       delete process.env[`TENANT_DID_URL_${tenantName}`]
       delete process.env[`TENANT_CRYPTOSUITE_${tenantName}`]
-      delete process.env[`TENANT_SEED_${ecdsaWebTenant}`]
+      delete process.env[`TENANT_KEY_PUBLIC_${ecdsaWebTenant}`]
+      delete process.env[`TENANT_KEY_SECRET_${ecdsaWebTenant}`]
       delete process.env[`TENANT_DIDMETHOD_${ecdsaWebTenant}`]
       delete process.env[`TENANT_DID_URL_${ecdsaWebTenant}`]
       delete process.env[`TENANT_CRYPTOSUITE_${ecdsaWebTenant}`]
@@ -684,7 +693,7 @@ describe('api', () => {
 
       const { didDocument } = await getSigningMaterial({
         method: 'web',
-        seed: await decodeSeed(tenantSeed),
+        keyMaterial: ed25519SeedMaterial(await decodeSeed(tenantSeed)),
         url: tenantUrl,
         cryptosuite: 'eddsa-rdfc-2022'
       })

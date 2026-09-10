@@ -131,7 +131,11 @@ export function normaliseDidDocument(didDocument, suiteModule) {
  */
 export async function getTenantDidDocument(instanceId) {
   const config = await getTenantSeed(instanceId)
-  if (!config?.didSeed) throw new SigningException(404, "Tenant doesn't exist.")
+  // Existence is `keyMaterial`, not `didSeed`. An ecdsa-rdfc-2019 tenant has no
+  // seed, so testing for one turned the deliberate refusal below into a bare
+  // "tenant doesn't exist" — the wrong answer to the right question.
+  if (!config?.keyMaterial)
+    throw new SigningException(404, "Tenant doesn't exist.")
 
   const { didSeed, didMethod, didUrl, cryptosuite } = config
 

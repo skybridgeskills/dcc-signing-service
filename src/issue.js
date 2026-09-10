@@ -8,9 +8,10 @@ import SigningException from './SigningException.js'
 import { issue as signVC } from '@digitalbazaar/vc'
 import * as EcdsaMultikey from '@digitalbazaar/ecdsa-multikey'
 import selectSuite from './suites/selectSuite.js'
-
-/** P-256 curve name used for every ecdsa-rdfc-2019 key this service mints. */
-const ECDSA_CURVE = 'P-256'
+import {
+  assertKeyMaterialMatchesCryptosuite,
+  loadEcdsaKeyPair
+} from './keyMaterial.js'
 
 let ISSUER_INSTANCES = {}
 const documentLoader = securityLoader().build()
@@ -40,15 +41,18 @@ export const clearIssuerInstances = () => {
 
 const getIssuerInstance = async (instanceId) => {
   const config = await getTenantSeed(instanceId)
-  if (!config?.didSeed) throw new SigningException(404, "Tenant doesn't exist.")
+  // Existence is `keyMaterial`, not `didSeed`: an ecdsa-rdfc-2019 tenant has no
+  // seed at all, and testing for one made it look like no tenant.
+  if (!config?.keyMaterial)
+    throw new SigningException(404, "Tenant doesn't exist.")
 
-  const { didSeed, didMethod, didUrl, cryptosuite } = config
+  const { keyMaterial, didMethod, didUrl, cryptosuite } = config
   // Include cryptosuite in cache key to handle tenants with different suites
   const cacheKey = `${instanceId}:${cryptosuite || 'legacy'}`
 
   if (!ISSUER_INSTANCES[cacheKey]) {
     ISSUER_INSTANCES[cacheKey] = await buildIssuerInstance(
-      didSeed,
+      keyMaterial,
       didMethod,
       didUrl,
       cryptosuite
@@ -112,9 +116,9 @@ const injectContexts = (credential, requiredContexts) => {
   credential['@context'] = merged
 }
 
-const buildIssuerInstance = async (seed, method, url, cryptosuite) => {
+const buildIssuerInstance = async (keyMaterial, method, url, cryptosuite) => {
   const { didDocument, key } = await getSigningMaterial({
-    seed,
+    keyMaterial,
     method,
     url,
     cryptosuite
@@ -130,13 +134,32 @@ const buildIssuerInstance = async (seed, method, url, cryptosuite) => {
   return { issuerInstance, didDocument }
 }
 
-export async function getSigningMaterial({ method, seed, url, cryptosuite }) {
+/**
+ * Derives a tenant's issuer DID and a usable signing key from its key material.
+ *
+ * @param {object} args
+ * @param {string} args.method - `key` or `web`.
+ * @param {object} args.keyMaterial - A member of the key material union; see
+ *   `keyMaterial.js`. ⚠️ This used to be a bare `seed`, which an
+ *   `ecdsa-rdfc-2019` tenant cannot supply meaningfully.
+ * @param {string} [args.url] - Required for `did:web`.
+ * @param {string} [args.cryptosuite] - `TENANT_CRYPTOSUITE_<T>`.
+ */
+export async function getSigningMaterial({
+  method,
+  keyMaterial,
+  url,
+  cryptosuite
+}) {
   let did, key
+  assertKeyMaterialMatchesCryptosuite(keyMaterial, cryptosuite)
+  const seed = keyMaterial.seed
 
   // ECDSA needs a genuine P-256 key, not an Ed25519 one — a different curve,
-  // not a different wrapper around the same key. It is therefore generated
-  // here rather than derived from the Ed25519 material the other suites use,
-  // and both DID methods are served from the one branch.
+  // not a different wrapper around the same key. It cannot be derived from a
+  // seed at all (see `keyMaterial.js`), so it is loaded from the two multibase
+  // halves minted once at provisioning time, and both DID methods are served
+  // from the one branch.
   if (cryptosuite === 'ecdsa-rdfc-2019') {
     if (method === 'web') {
       // Deliberately refused rather than mis-issued. The did:web driver
@@ -156,7 +179,12 @@ export async function getSigningMaterial({ method, seed, url, cryptosuite }) {
       // must not have a key published on its behalf either.
       throw new SigningException(400, ECDSA_DID_WEB_REFUSAL)
     }
-    const keyPair = await EcdsaMultikey.generate({ curve: ECDSA_CURVE, seed })
+    // ⚠️ This was `EcdsaMultikey.generate({ curve, seed })`, and that call is
+    // why this milestone exists: the library destructures only
+    // `{id, controller, curve, keyAgreement}`, so the seed was silently
+    // discarded and every restart minted a new issuer identity. Loading the
+    // persisted halves is what makes the DID stable.
+    const keyPair = await loadEcdsaKeyPair(keyMaterial)
     did = await didKeyDriver.fromKeyPair({ verificationKeyPair: keyPair })
     const assertionMethod = did.methodFor({ purpose: 'assertionMethod' })
     key = await EcdsaMultikey.from({
@@ -164,7 +192,7 @@ export async function getSigningMaterial({ method, seed, url, cryptosuite }) {
       id: assertionMethod.id,
       controller: assertionMethod.controller,
       publicKeyMultibase: assertionMethod.publicKeyMultibase,
-      secretKeyMultibase: keyPair.secretKeyMultibase
+      secretKeyMultibase: keyMaterial.secretKeyMultibase
     })
     return { didDocument: did.didDocument, key }
   }

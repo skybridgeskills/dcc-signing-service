@@ -13,6 +13,7 @@ IMPORTANT NOTE ABOUT VERSIONING: If you are using a Docker Hub image of this rep
   - [Signing Key](#signing-key)
     - [did:key generator](#didkey-generator)
     - [did:web generator](#didweb-generator)
+    - [ecdsa-rdfc-2019 key material](#ecdsa-rdfc-2019-key-material)
   - [DID Registries](#did-registries)
   - [did:key](#didkey)
   - [did:web](#didweb)
@@ -99,10 +100,12 @@ There is a sample .env file provided called .env.example to help you get started
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------- | -------- |
 | `PORT`                             | http port on which to run the express app                                                                           | 4006                       | no       |
 | `ENABLE_HTTPS_FOR_DEV`             | runs the dev server over https - ONLY FOR DEV - typically to allow CORS calls from a browser                        | false                      | no       |
-| `TENANT_SEED_{TENANT_NAME}`        | see [tenants](#tenants) section for instructions                                                                    | no                         | no       |
+| `TENANT_SEED_{TENANT_NAME}`        | see [tenants](#tenants) section for instructions. Ed25519 suites only — an `ecdsa-rdfc-2019` tenant must NOT set one | no                         | no       |
+| `TENANT_KEY_PUBLIC_{TENANT_NAME}`  | public multibase half of an `ecdsa-rdfc-2019` tenant's P-256 key — see [ecdsa-rdfc-2019 key material](#ecdsa-rdfc-2019-key-material) |                            | no       |
+| `TENANT_KEY_SECRET_{TENANT_NAME}`  | secret multibase half of the same key. Both halves or neither                                                       |                            | no       |
 | `TENANT_DIDMETHOD_{TENANT_NAME}`   | did method (`key` or `web`) to use for signing on this tenant                                                       | `key`                      | no       |
 | `TENANT_DID_URL_{TENANT_NAME}`     | url to use for did:web                                                                                              |                            | no       |
-| `TENANT_CRYPTOSUITE_{TENANT_NAME}` | cryptosuite to use (`eddsa-rdfc-2022` for DataIntegrityProof, omit for Ed25519Signature2020)                        | `Ed25519Signature2020`     | no       |
+| `TENANT_CRYPTOSUITE_{TENANT_NAME}` | cryptosuite to use (`eddsa-rdfc-2022` or `ecdsa-rdfc-2019` for DataIntegrityProof, omit for Ed25519Signature2020)    | `Ed25519Signature2020`     | no       |
 | `TENANT_AUTH_TOKEN_{TENANT_NAME}`  | Secret for Bearer (`Authorization: Bearer …`) or Basic Auth password on `/credentials/issue`. Each token must be unique if you use Bearer. See [VCALM endpoint](#vcalm-issue-endpoint) |                            | no       |
 | `ENABLE_ACCESS_LOGGING`            | log all http calls to the service - see [Logging](#logging)                                                         | true                       | no       |
 | `ERROR_LOG_FILE`                   | log file for all errors - see [Logging](#logging)                                                                   | no                         | no       |
@@ -141,7 +144,9 @@ issuer DID silently changes across restarts. Credentials issued either side of
 a restart then carry different issuers — harmless for verification, since
 `did:key` is self-describing, but confusing for anything that correlates
 credentials to an issuer over time (evaluation runs, status lists, audit
-trails). Generate a seed once via `/did-key-generator` and pin it.
+trails). Generate a seed once via `/did-key-generator` and pin it. (An
+`ecdsa-rdfc-2019` tenant has no seed to pin — see
+[ecdsa-rdfc-2019 key material](#ecdsa-rdfc-2019-key-material).)
 
 **Supported cryptosuites** (`TENANT_CRYPTOSUITE_{TENANT_NAME}`):
 
@@ -156,6 +161,27 @@ document whose `@context` is hardcoded to the Ed25519/X25519 suite contexts and
 emits no verification method for an ECDSA key, so publishing a P-256 key there
 would misdescribe it to every relying party. Supporting it means composing the
 DID document ourselves or replacing the resolver.
+
+**An `ecdsa-rdfc-2019` tenant is configured differently from every other
+tenant: it carries no seed.** P-256 key material cannot be derived from a seed
+in this stack, so it is minted once and both multibase halves are persisted:
+
+```
+TENANT_CRYPTOSUITE_LEDGERLAB=ecdsa-rdfc-2019
+TENANT_KEY_PUBLIC_LEDGERLAB=zDna…
+TENANT_KEY_SECRET_LEDGERLAB=z42t…
+```
+
+See [ecdsa-rdfc-2019 key material](#ecdsa-rdfc-2019-key-material) for how to
+mint them. **Four declarations are refused at startup**, naming the tenant,
+rather than falling back to anything:
+
+| Declaration | Why it is refused |
+| --- | --- |
+| `ecdsa-rdfc-2019` with only a `TENANT_SEED_` | The P-256 generator discards its seed, so the seed pins nothing and the tenant's DID would change on every restart |
+| Both a `TENANT_SEED_` and key material | Nothing can decide which is authoritative |
+| `TENANT_KEY_PUBLIC_` without `TENANT_KEY_SECRET_`, or the reverse | Half a key pair cannot sign, and the missing half cannot be derived from the one present |
+| Key material on a tenant that is not `ecdsa-rdfc-2019` | No other suite consumes multibase halves |
 
 For the legacy sign endpoint, tenant names appear in the URL:
 
@@ -399,6 +425,35 @@ You must also set the `TENANT_DIDMETHOD_{TENANT_NAME}=web` environment variable 
 #### random tenant key
 
 NOTE: there is also an option to set the seed value for a tenant to `generate`. The system will generate a random did:key for any tenants so configured. This is really only useful for testing and experimenting since the keys are lost on restart, and the associated [DID](https://www.w3.org/TR/did-core/) for each is not registered in any public registry.
+
+#### ecdsa-rdfc-2019 key material
+
+`ecdsa-rdfc-2019` tenants do **not** use a seed, and there is no generator
+endpoint for them. `@digitalbazaar/ecdsa-multikey`'s `generate()` accepts no
+seed argument — it silently ignores one — and its raw-import path cannot
+recompute a P-256 public key from the secret, so the material is minted once
+and **both multibase halves are persisted**. Minting at start-up is exactly the
+failure this replaces: a key minted when the process starts is a key that
+changes when the process restarts.
+
+Mint a tenant's material with:
+
+```
+npm run mint:ecdsa -- --tenant LEDGERLAB
+```
+
+It prints three values, and where each one goes matters:
+
+| Value | Goes to |
+| --- | --- |
+| `publicKeyMultibase` | Your secret store, as `TENANT_KEY_PUBLIC_{TENANT_NAME}` |
+| `secretKeyMultibase` | Your secret store, as `TENANT_KEY_SECRET_{TENANT_NAME}`. Never into git, a ticket or a chat message |
+| `did:key` | Publishable, and the value any consumer advertising this tenant's issuer identity needs |
+
+The key cannot be regenerated: losing the secret half means a new DID for that
+tenant. Run `npm run mint:ecdsa -- --help` for the full notes, and see
+[`docs/adr/2026-09-10-ecdsa-key-material-both-multibase-halves.md`](docs/adr/2026-09-10-ecdsa-key-material-both-multibase-halves.md)
+for why it is shaped this way.
 
 ### DID Registries
 

@@ -3,6 +3,7 @@ import request from 'supertest'
 import { build } from './app.js'
 import { resetConfig } from './config.js'
 import { clearIssuerInstances } from './issue.js'
+import { generateEcdsaKeyMaterial } from './keyMaterial.js'
 import { ECDSA_DID_WEB_REFUSAL } from './didWeb.js'
 import { Ed25519VerificationKey2020 } from '@digitalbazaar/ed25519-verification-key-2020'
 
@@ -55,8 +56,14 @@ describe('POST /instance/:instanceId/openid4vp/request-object/sign', () => {
     process.env[`TENANT_SEED_${legacyTenant}`] = tenantSeed
     process.env[`TENANT_DIDMETHOD_${legacyTenant}`] = 'web'
     process.env[`TENANT_DID_URL_${legacyTenant}`] = tenantUrl
-    // A did:web tenant on the refused suite.
-    process.env[`TENANT_SEED_${ecdsaWebTenant}`] = tenantSeed
+    // A did:web tenant on the refused suite. It carries minted key material
+    // rather than a seed: an ecdsa-rdfc-2019 tenant declaring a seed is refused
+    // at startup now, and that earlier refusal would mask the one under test.
+    const ecdsaKeyMaterial = await generateEcdsaKeyMaterial()
+    process.env[`TENANT_KEY_PUBLIC_${ecdsaWebTenant}`] =
+      ecdsaKeyMaterial.publicKeyMultibase
+    process.env[`TENANT_KEY_SECRET_${ecdsaWebTenant}`] =
+      ecdsaKeyMaterial.secretKeyMultibase
     process.env[`TENANT_DIDMETHOD_${ecdsaWebTenant}`] = 'web'
     process.env[`TENANT_DID_URL_${ecdsaWebTenant}`] = tenantUrl
     process.env[`TENANT_CRYPTOSUITE_${ecdsaWebTenant}`] = 'ecdsa-rdfc-2019'
@@ -68,6 +75,8 @@ describe('POST /instance/:instanceId/openid4vp/request-object/sign', () => {
   after(() => {
     for (const t of [tenantName, legacyTenant, ecdsaWebTenant, keyTenant]) {
       delete process.env[`TENANT_SEED_${t}`]
+      delete process.env[`TENANT_KEY_PUBLIC_${t}`]
+      delete process.env[`TENANT_KEY_SECRET_${t}`]
       delete process.env[`TENANT_DIDMETHOD_${t}`]
       delete process.env[`TENANT_DID_URL_${t}`]
       delete process.env[`TENANT_CRYPTOSUITE_${t}`]

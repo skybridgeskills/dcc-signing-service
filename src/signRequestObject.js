@@ -95,10 +95,10 @@ export async function signRequestObject(claims, instanceId) {
     )
   }
 
-  const { didSeed, didMethod, didUrl, cryptosuite } =
+  const { keyMaterial, didMethod, didUrl, cryptosuite } =
     await getTenantSeed(instanceId)
   const { key } = await getSigningMaterial({
-    seed: didSeed,
+    keyMaterial,
     method: didMethod,
     url: didUrl,
     cryptosuite
