@@ -5,6 +5,15 @@ import {
   ListSecretsCommand
 } from '@aws-sdk/client-secrets-manager'
 import decodeSeed from './utils/decodeSeed.js'
+import {
+  KEY_MATERIAL_MULTIKEY,
+  TENANT_SEED_PREFIX,
+  TENANT_KEY_PUBLIC_PREFIX,
+  TENANT_KEY_SECRET_PREFIX,
+  classifyTenantKeyMaterial,
+  ed25519SeedMaterial,
+  multikeyMaterial
+} from './keyMaterial.js'
 
 let CONFIG
 const defaultPort = 4006
@@ -23,8 +32,35 @@ function rebuildTokenToTenantMap() {
   TOKEN_TO_TENANT.clear()
   for (const [name, cfg] of Object.entries(DID_SEEDS)) {
     if (cfg && typeof cfg === 'object' && cfg.authToken) {
+      const existing = TOKEN_TO_TENANT.get(cfg.authToken)
+      if (existing && existing !== name) {
+        console.warn(
+          `[auth] Duplicate TENANT_AUTH_TOKEN shared by tenants '${existing}' ` +
+            `and '${name}'. Bearer auth for this token will resolve to one tenant ` +
+            `only. Use a distinct token per tenant.`
+        )
+      }
       TOKEN_TO_TENANT.set(cfg.authToken, name)
     }
+  }
+  warnTokenlessTenants()
+}
+
+/**
+ * Emits one consolidated warning listing tenants without an authToken, which
+ * accept Basic Auth with any password on /credentials/issue. Intentional open
+ * mode; set a token to require authentication for those tenants.
+ */
+function warnTokenlessTenants() {
+  const tokenless = Object.entries(DID_SEEDS)
+    .filter(([, cfg]) => cfg && typeof cfg === 'object' && !cfg.authToken)
+    .map(([name]) => name)
+  if (tokenless.length) {
+    console.warn(
+      `[auth] Tenants without TENANT_AUTH_TOKEN accept any password on ` +
+        `/credentials/issue: ${tokenless.join(', ')}. Set a token to require ` +
+        `authentication for these tenants.`
+    )
   }
 }
 
@@ -129,8 +165,10 @@ export async function fetchAndUpdateTenantSeeds() {
   const tenants = await getTenantsFromAwsSecretsManager()
   if (tenants && tenants.length > 0) {
     for (const tenant of tenants) {
+      const didSeed = await decodeSeed(tenant.didSeed)
       DID_SEEDS[tenant.name] = {
-        didSeed: await decodeSeed(tenant.didSeed),
+        keyMaterial: ed25519SeedMaterial(didSeed),
+        didSeed,
         didMethod: 'key',
         cryptosuite: tenant.cryptosuite,
         authToken: tenant.authToken
@@ -138,11 +176,13 @@ export async function fetchAndUpdateTenantSeeds() {
     }
     // add in the default test key now, so it can be overridden by env
     DID_SEEDS[TEST_TENANT_NAME] = {
+      keyMaterial: ed25519SeedMaterial(await decodeSeed(testSeed)),
       didSeed: await decodeSeed(testSeed),
       didMethod: 'key'
     }
     // and again with a different tenant name
     DID_SEEDS[SECOND_TEST_TENANT_NAME] = {
+      keyMaterial: ed25519SeedMaterial(await decodeSeed(testSeed)),
       didSeed: await decodeSeed(testSeed),
       didMethod: 'key'
     }
@@ -153,11 +193,13 @@ export async function fetchAndUpdateTenantSeeds() {
   // If TENANTS_API_URL is not set or failed, continue with default and environment variable processing
   // add in the default test key now, so it can be overridden by env
   DID_SEEDS[TEST_TENANT_NAME] = {
+    keyMaterial: ed25519SeedMaterial(await decodeSeed(testSeed)),
     didSeed: await decodeSeed(testSeed),
     didMethod: 'key'
   }
   // and again with a different tenant name
   DID_SEEDS[SECOND_TEST_TENANT_NAME] = {
+    keyMaterial: ed25519SeedMaterial(await decodeSeed(testSeed)),
     didSeed: await decodeSeed(testSeed),
     didMethod: 'key'
   }
@@ -165,29 +207,100 @@ export async function fetchAndUpdateTenantSeeds() {
   const randomSeed = { didSeed: await generateSecretKeySeed() }
   DID_SEEDS[randomTenantName] = await decodeSeed(randomSeed.didSeed)
   const allEnvVars = process.env
-  const didSeedKeys = Object.getOwnPropertyNames(allEnvVars).filter((key) =>
-    key.toUpperCase().startsWith('TENANT_SEED_')
-  )
-  for (const key of didSeedKeys) {
-    let value = allEnvVars[key]
-    if (value === 'generate') {
-      value = await generateSecretKeySeed()
-    }
-    const tenant = key.slice(12)
+  for (const { tenant, seedEnvKey } of discoverTenants(allEnvVars)) {
     const tenantName = tenant.toLowerCase()
+    const cryptosuite = process.env[`TENANT_CRYPTOSUITE_${tenant}`]
+    const publicKeyMultibase =
+      process.env[`${TENANT_KEY_PUBLIC_PREFIX}${tenant}`]
+    const secretKeyMultibase =
+      process.env[`${TENANT_KEY_SECRET_PREFIX}${tenant}`]
+
+    // Shape first, values second. An ambiguous or half-written declaration is
+    // refused before anything is decoded, so the operator gets a message about
+    // the variables they wrote rather than one from inside a crypto library.
+    const kind = classifyTenantKeyMaterial({
+      tenant,
+      cryptosuite,
+      seed: seedEnvKey ? allEnvVars[seedEnvKey] : undefined,
+      publicKeyMultibase,
+      secretKeyMultibase
+    })
+
+    let keyMaterial
+    if (kind === KEY_MATERIAL_MULTIKEY) {
+      keyMaterial = multikeyMaterial({ publicKeyMultibase, secretKeyMultibase })
+    } else {
+      let value = allEnvVars[seedEnvKey]
+      if (value === 'generate') {
+        value = await generateSecretKeySeed()
+      }
+      keyMaterial = ed25519SeedMaterial(await decodeSeed(value))
+    }
+
     DID_SEEDS[tenantName] = {
-      didSeed: await decodeSeed(value),
+      keyMaterial,
+      // The decoded seed, still on the entry, for the did:web driver and the
+      // Ed25519 signing paths that take one directly. Undefined for an ECDSA
+      // tenant, which has no seed at all — `keyMaterial` is what every caller
+      // should test a tenant's existence on.
+      didSeed: keyMaterial.seed,
       didMethod:
         process.env[`TENANT_DIDMETHOD_${tenant}`] &&
         process.env[`TENANT_DIDMETHOD_${tenant}`].toLowerCase() === 'web'
           ? 'web'
           : 'key',
       didUrl: process.env[`TENANT_DID_URL_${tenant}`],
-      cryptosuite: process.env[`TENANT_CRYPTOSUITE_${tenant}`],
+      cryptosuite,
       authToken: process.env[`TENANT_AUTH_TOKEN_${tenant}`]
     }
   }
   rebuildTokenToTenantMap()
+}
+
+/**
+ * Finds every tenant declared in the environment.
+ *
+ * ⚠️ **The tenant set is the UNION of the key-material families, not the
+ * `TENANT_SEED_` family alone.** This filtered on `TENANT_SEED_` until ECDSA
+ * tenants existed, which meant a tenant carrying only `TENANT_KEY_PUBLIC_<T>` /
+ * `TENANT_KEY_SECRET_<T>` was *invisible* rather than merely unsigned: no
+ * refusal, no warning, a 404 at issuance and nothing to explain it.
+ * `TENANT_KEY_SECRET_` is included as a discovery family too, even though a
+ * complete ECDSA tenant always declares the public half — otherwise a
+ * secret-only declaration would vanish instead of hitting the half-a-pair
+ * refusal, which is the same disappearing act one variable over.
+ *
+ * ⚠️ **The suffix is sliced raw and case-preserved**, then interpolated into
+ * `TENANT_CRYPTOSUITE_${tenant}` and its siblings — so a mixed-case tenant name
+ * silently yields `cryptosuite: undefined`. Long-standing behaviour, preserved
+ * deliberately rather than fixed here; provisioning uses one uppercase suffix
+ * everywhere. The seed's *own* env key is carried through rather than
+ * reconstructed, for the same reason: the filter matches case-insensitively but
+ * `process.env` does not.
+ *
+ * @param {object} allEnvVars - Normally `process.env`.
+ * @returns {Array<{tenant: string, seedEnvKey?: string}>} One entry per raw
+ *   suffix, in the order the environment first mentions it.
+ */
+function discoverTenants(allEnvVars) {
+  const bySuffix = new Map()
+  const slotFor = (suffix) => {
+    if (!bySuffix.has(suffix)) bySuffix.set(suffix, { tenant: suffix })
+    return bySuffix.get(suffix)
+  }
+
+  for (const key of Object.getOwnPropertyNames(allEnvVars)) {
+    const upper = key.toUpperCase()
+    if (upper.startsWith(TENANT_SEED_PREFIX)) {
+      slotFor(key.slice(TENANT_SEED_PREFIX.length)).seedEnvKey = key
+    } else if (upper.startsWith(TENANT_KEY_PUBLIC_PREFIX)) {
+      slotFor(key.slice(TENANT_KEY_PUBLIC_PREFIX.length))
+    } else if (upper.startsWith(TENANT_KEY_SECRET_PREFIX)) {
+      slotFor(key.slice(TENANT_KEY_SECRET_PREFIX.length))
+    }
+  }
+
+  return [...bySuffix.values()]
 }
 
 function parseConfig() {

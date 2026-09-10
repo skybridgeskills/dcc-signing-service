@@ -1,9 +1,20 @@
+import { timingSafeEqual } from 'node:crypto'
 import SigningException from '../SigningException.js'
 import {
   getTenantSeed,
   getTenantByToken,
   ensureTenantSeedsLoaded
 } from '../config.js'
+
+/** Constant-time string compare that also avoids length-based early exit. */
+function secretsMatch(a, b) {
+  const bufA = Buffer.from(String(a), 'utf8')
+  const bufB = Buffer.from(String(b), 'utf8')
+  if (bufA.length !== bufB.length) {
+    return false
+  }
+  return timingSafeEqual(bufA, bufB)
+}
 
 /**
  * Parses Basic Auth credentials from Authorization header.
@@ -20,9 +31,16 @@ function parseBasicAuth(authHeader) {
 
   try {
     const decoded = Buffer.from(encoded, 'base64').toString('utf8')
-    const [username, password] = decoded.split(':')
+    const sep = decoded.indexOf(':')
 
-    if (!username || password === undefined) {
+    if (sep === -1) {
+      return null
+    }
+
+    const username = decoded.slice(0, sep)
+    const password = decoded.slice(sep + 1)
+
+    if (!username) {
       return null
     }
 
@@ -76,7 +94,7 @@ export async function authenticateAndIdentifyTenant(req, res, next) {
 
     if (
       tenantConfig.authToken &&
-      credentials.password !== tenantConfig.authToken
+      !secretsMatch(credentials.password, tenantConfig.authToken)
     ) {
       return next(new SigningException(401, 'Invalid password'))
     }
@@ -100,7 +118,7 @@ export async function authenticateAndIdentifyTenant(req, res, next) {
     }
 
     const tenantConfig = await getTenantSeed(instanceId)
-    if (!tenantConfig || tenantConfig.authToken !== token) {
+    if (!tenantConfig || !secretsMatch(tenantConfig.authToken ?? '', token)) {
       return next(new SigningException(401, 'Invalid token'))
     }
 

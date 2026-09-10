@@ -1,29 +1,37 @@
 import { Ed25519VerificationKey2020 } from '@digitalbazaar/ed25519-verification-key-2020'
 import * as Ed25519Multikey from '@digitalbazaar/ed25519-multikey'
-import { CryptoLD } from 'crypto-ld'
 import { driver as keyDriver } from '@digitalbazaar/did-method-key'
-import { driver as webDriver } from '@interop/did-web-resolver'
 import { securityLoader } from '@digitalcredentials/security-document-loader'
 import { getTenantSeed } from './config.js'
+import { didWebDriver, ECDSA_DID_WEB_REFUSAL } from './didWeb.js'
 import SigningException from './SigningException.js'
 import { issue as signVC } from '@digitalbazaar/vc'
-import * as Ed25519Signature2020Suite from './suites/Ed25519Signature2020Suite.js'
-import * as EddsaRdfc2022Suite from './suites/EddsaRdfc2022Suite.js'
+import * as EcdsaMultikey from '@digitalbazaar/ecdsa-multikey'
+import selectSuite from './suites/selectSuite.js'
+import {
+  assertKeyMaterialMatchesCryptosuite,
+  loadEcdsaKeyPair
+} from './keyMaterial.js'
 
 let ISSUER_INSTANCES = {}
 const documentLoader = securityLoader().build()
 
-// Crypto library for linked data
-const cryptoLd = new CryptoLD()
-cryptoLd.use(Ed25519VerificationKey2020)
-
-// DID drivers
-const didWebDriver = webDriver({ cryptoLd })
+// DID drivers. `didWebDriver` is shared with `generate.js` and with the
+// `GET /instance/:instanceId/did.json` endpoint — the published document has to
+// come off the same driver as the signing key, or it is a copy again.
 const didKeyDriver = keyDriver()
 
 didKeyDriver.use({
   multibaseMultikeyHeader: 'z6Mk',
   fromMultibase: Ed25519VerificationKey2020.from
+})
+
+// P-256 multikeys carry the `zDna` header. Without this the did:key driver
+// cannot express an ECDSA key at all, so ecdsa-rdfc-2019 could be selected
+// as a suite but never produce a usable issuer DID.
+didKeyDriver.use({
+  multibaseMultikeyHeader: 'zDna',
+  fromMultibase: EcdsaMultikey.from
 })
 
 /* FOR TESTING */
@@ -33,15 +41,18 @@ export const clearIssuerInstances = () => {
 
 const getIssuerInstance = async (instanceId) => {
   const config = await getTenantSeed(instanceId)
-  if (!config?.didSeed) throw new SigningException(404, "Tenant doesn't exist.")
+  // Existence is `keyMaterial`, not `didSeed`: an ecdsa-rdfc-2019 tenant has no
+  // seed at all, and testing for one made it look like no tenant.
+  if (!config?.keyMaterial)
+    throw new SigningException(404, "Tenant doesn't exist.")
 
-  const { didSeed, didMethod, didUrl, cryptosuite } = config
+  const { keyMaterial, didMethod, didUrl, cryptosuite } = config
   // Include cryptosuite in cache key to handle tenants with different suites
   const cacheKey = `${instanceId}:${cryptosuite || 'legacy'}`
 
   if (!ISSUER_INSTANCES[cacheKey]) {
     ISSUER_INSTANCES[cacheKey] = await buildIssuerInstance(
-      didSeed,
+      keyMaterial,
       didMethod,
       didUrl,
       cryptosuite
@@ -86,39 +97,127 @@ const addIssuerId = (credential, issuerId) => {
 }
 
 /**
- * Selects the appropriate suite module based on cryptosuite configuration.
+ * Injects any suite-required JSON-LD contexts into the credential, deduping
+ * while preserving order and keeping caller-supplied contexts first.
  *
- * @param {string} cryptosuite - The cryptosuite name (e.g., 'eddsa-rdfc-2022')
- * @returns {object} The suite module
+ * @param {object} credential - The credential to inject contexts into (mutated)
+ * @param {string[]} requiredContexts - Context URLs the suite requires
  */
-const selectSuite = (cryptosuite) => {
-  switch (cryptosuite) {
-    case 'eddsa-rdfc-2022':
-      return EddsaRdfc2022Suite
-    default:
-      // Default to legacy Ed25519Signature2020
-      return Ed25519Signature2020Suite
+const injectContexts = (credential, requiredContexts) => {
+  const existing = Array.isArray(credential['@context'])
+    ? credential['@context']
+    : credential['@context']
+      ? [credential['@context']]
+      : []
+  const merged = [...existing]
+  for (const ctx of requiredContexts) {
+    if (!merged.includes(ctx)) merged.push(ctx)
   }
+  credential['@context'] = merged
 }
 
-const buildIssuerInstance = async (seed, method, url, cryptosuite) => {
+const buildIssuerInstance = async (keyMaterial, method, url, cryptosuite) => {
   const { didDocument, key } = await getSigningMaterial({
-    seed,
+    keyMaterial,
     method,
     url,
     cryptosuite
   })
   const suiteModule = selectSuite(cryptosuite)
   const signingSuite = suiteModule.createSuite(key)
-  const issuerInstance = new IssuerInstance({ documentLoader, signingSuite })
+  const requiredContexts = suiteModule.getRequiredContexts()
+  const issuerInstance = new IssuerInstance({
+    documentLoader,
+    signingSuite,
+    requiredContexts
+  })
   return { issuerInstance, didDocument }
 }
 
-export async function getSigningMaterial({ method, seed, url, cryptosuite }) {
+/**
+ * Derives a tenant's issuer DID and a usable signing key from its key material.
+ *
+ * @param {object} args
+ * @param {string} args.method - `key` or `web`.
+ * @param {object} args.keyMaterial - A member of the key material union; see
+ *   `keyMaterial.js`. ⚠️ This used to be a bare `seed`, which an
+ *   `ecdsa-rdfc-2019` tenant cannot supply meaningfully.
+ * @param {string} [args.url] - Required for `did:web`.
+ * @param {string} [args.cryptosuite] - `TENANT_CRYPTOSUITE_<T>`.
+ */
+export async function getSigningMaterial({
+  method,
+  keyMaterial,
+  url,
+  cryptosuite
+}) {
   let did, key
+  assertKeyMaterialMatchesCryptosuite(keyMaterial, cryptosuite)
+  const seed = keyMaterial.seed
+
+  // ECDSA needs a genuine P-256 key, not an Ed25519 one — a different curve,
+  // not a different wrapper around the same key. It cannot be derived from a
+  // seed at all (see `keyMaterial.js`), so it is loaded from the two multibase
+  // halves minted once at provisioning time, and both DID methods are served
+  // from the one branch.
+  if (cryptosuite === 'ecdsa-rdfc-2019') {
+    if (method === 'web') {
+      // Deliberately refused rather than mis-issued. The did:web driver
+      // composes a DID document whose @context is hardcoded to the Ed25519
+      // and X25519 suite contexts, with no Multikey / data-integrity context,
+      // and it does not emit a verification method for an ECDSA key at all.
+      // Publishing a P-256 key inside an Ed25519-context document would be a
+      // silent mis-issuance: it would look fine here and fail, or worse
+      // verify ambiguously, at a relying party.
+      //
+      // Supporting it means composing the document ourselves or replacing the
+      // resolver — a larger change than adding a cryptosuite, and out of
+      // scope until something needs it. did:key + ecdsa-rdfc-2019 works.
+      //
+      // The message lives in `didWeb.js` because the document endpoint refuses
+      // the same combination with the same words: a tenant that cannot sign
+      // must not have a key published on its behalf either.
+      throw new SigningException(400, ECDSA_DID_WEB_REFUSAL)
+    }
+    // ⚠️ This was `EcdsaMultikey.generate({ curve, seed })`, and that call is
+    // why this milestone exists: the library destructures only
+    // `{id, controller, curve, keyAgreement}`, so the seed was silently
+    // discarded and every restart minted a new issuer identity. Loading the
+    // persisted halves is what makes the DID stable.
+    const keyPair = await loadEcdsaKeyPair(keyMaterial)
+    did = await didKeyDriver.fromKeyPair({ verificationKeyPair: keyPair })
+    const assertionMethod = did.methodFor({ purpose: 'assertionMethod' })
+    key = await EcdsaMultikey.from({
+      type: 'Multikey',
+      id: assertionMethod.id,
+      controller: assertionMethod.controller,
+      publicKeyMultibase: assertionMethod.publicKeyMultibase,
+      secretKeyMultibase: keyMaterial.secretKeyMultibase
+    })
+    return { didDocument: did.didDocument, key }
+  }
+
   if (method === 'web') {
     did = await didWebDriver.generate({ seed, url })
-    key = did.methodFor({ purpose: 'assertionMethod' })
+    const assertionMethod = did.methodFor({ purpose: 'assertionMethod' })
+
+    // For eddsa-rdfc-2022, we need an Ed25519Multikey signer — same as the
+    // did:key branch below. The did:web driver hands back an
+    // Ed25519VerificationKey2020, whose signer reports no `algorithm`, and
+    // DataIntegrityProof rejects it with "The signer's algorithm 'undefined'
+    // does not match the required algorithm for the cryptosuite 'Ed25519'".
+    if (cryptosuite === 'eddsa-rdfc-2022') {
+      key = await Ed25519Multikey.from({
+        type: 'Multikey',
+        id: assertionMethod.id,
+        controller: assertionMethod.controller,
+        publicKeyMultibase: assertionMethod.publicKeyMultibase,
+        secretKeyMultibase: assertionMethod.privateKeyMultibase
+      })
+    } else {
+      // Legacy Ed25519Signature2020 uses the key object directly
+      key = assertionMethod
+    }
   } else {
     const verificationKeyPair = await Ed25519VerificationKey2020.generate({
       seed
@@ -151,13 +250,15 @@ export async function getSigningMaterial({ method, seed, url, cryptosuite }) {
 }
 
 export class IssuerInstance {
-  constructor({ documentLoader, signingSuite }) {
+  constructor({ documentLoader, signingSuite, requiredContexts }) {
     this.documentLoader = documentLoader
     this.signingSuite = signingSuite
+    this.requiredContexts = requiredContexts || []
   }
   async issueCredential({ credential, options }) {
     // this library attaches the signature on the original object, so make a copy
     const credCopy = JSON.parse(JSON.stringify(credential))
+    injectContexts(credCopy, this.requiredContexts)
     try {
       return signVC({
         credential: credCopy,

@@ -6,7 +6,19 @@ const tenantName = 'configtest'
 describe('Config', () => {
   before(async () => {})
 
-  after(async () => {})
+  // ⚠️ The environment is process-wide and mocha runs every test file in one
+  // process. This block sets `TENANT_SEED_configtest` to a deliberately invalid
+  // value and used to leave it there — so `fetchAndUpdateTenantSeeds`, which
+  // decodes EVERY `TENANT_SEED_*` it finds, threw for any later file that
+  // loaded seeds. It went unnoticed because nothing after this file did, until
+  // one did.
+  after(async () => {
+    delete process.env[`TENANT_SEED_${tenantName}`]
+    delete process.env[`TENANT_DIDMETHOD_${tenantName}`]
+    delete process.env[`TENANT_CRYPTOSUITE_${tenantName}`]
+    delete process.env[`TENANT_AUTH_TOKEN_${tenantName}`]
+    resetConfig()
+  })
 
   beforeEach(async () => {
     resetConfig()
@@ -114,14 +126,17 @@ describe('Config', () => {
     })
 
     it('throws an error when the seed is less than 32 bytes', async () => {
+      // ⚠️ This used to call `getTenantSeed` WITHOUT awaiting it, inside a
+      // try/catch. An async function's rejection cannot be caught that way, so
+      // the assertion never ran and the test could not fail. Awaited now, and
+      // asserted on the rejection.
       process.env[`TENANT_SEED_${tenantName}`] = 'tooShort'
       try {
-        getTenantSeed('configtest')
+        await getTenantSeed('configtest')
+        expect.fail('expected a short seed to be refused')
       } catch (err) {
-        expect(err).to.eql(
-          TypeError(
-            '"secretKeySeed" must be at least 32 bytes, preferably multibase-encoded.'
-          )
+        expect(err.message).to.eql(
+          '"secretKeySeed" must be at least 32 bytes, preferably multibase-encoded.'
         )
       }
     })

@@ -13,9 +13,14 @@ IMPORTANT NOTE ABOUT VERSIONING: If you are using a Docker Hub image of this rep
   - [Signing Key](#signing-key)
     - [did:key generator](#didkey-generator)
     - [did:web generator](#didweb-generator)
+    - [ecdsa-rdfc-2019 key material](#ecdsa-rdfc-2019-key-material)
   - [DID Registries](#did-registries)
   - [did:key](#didkey)
   - [did:web](#didweb)
+    - [Configuring a did:web tenant](#configuring-a-didweb-tenant)
+    - [Publishing the DID document](#publishing-the-did-document)
+      - [The published shape](#the-published-shape)
+    - [ecdsa-rdfc-2019 is did:key only](#ecdsa-rdfc-2019-is-didkey-only)
   - [Revocation](#revocation)
 - [Usage](#usage)
   - [Sign a credential](#sign-a-credential)
@@ -33,7 +38,7 @@ IMPORTANT NOTE ABOUT VERSIONING: If you are using a Docker Hub image of this rep
 
 Use this express server to sign [Verifiable Credentials](https://www.w3.org/TR/vc-data-model/). NEW: as of version 1.0.0 the signing-service works with both version 1 and version 2 Verifiable Credentials.
 
-Implements five http endpoints:
+Implements six http endpoints:
 
 - POST /instance/:instanceId/credentials/sign
 
@@ -50,6 +55,10 @@ Which is a convenience method for generating a new signing key, encoded as a [De
 - POST /did-web-generator
 
 Which is a convenience method for generating a new signing key, encoded as a [Decentralized Identifier (DID)](https://www.w3.org/TR/did-core/), specifically using the [did:web method](https://w3c-ccg.github.io/did-method-web/). Read about how to use it in the [did:web generator section](#didweb-generator).
+
+- GET /instance/:instanceId/did.json
+
+Which publishes a `did:web` tenant's DID document, **derived** on every request from that tenant's configured seed and `TENANT_DID_URL_{TENANT_NAME}` — so it cannot disagree with the key that signs. The key is published under `verificationMethod` and referenced by fragment from `assertionMethod` and `authentication`, with a type matching the tenant's cryptosuite. Unauthenticated, because a DID document is public by definition. Returns 404 for a `did:key` tenant, which has no document to host. Read more in the [Publishing the DID document](#publishing-the-did-document) section.
 
 - GET /healthz
 
@@ -91,10 +100,12 @@ There is a sample .env file provided called .env.example to help you get started
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------- | -------- |
 | `PORT`                             | http port on which to run the express app                                                                           | 4006                       | no       |
 | `ENABLE_HTTPS_FOR_DEV`             | runs the dev server over https - ONLY FOR DEV - typically to allow CORS calls from a browser                        | false                      | no       |
-| `TENANT_SEED_{TENANT_NAME}`        | see [tenants](#tenants) section for instructions                                                                    | no                         | no       |
+| `TENANT_SEED_{TENANT_NAME}`        | see [tenants](#tenants) section for instructions. Ed25519 suites only — an `ecdsa-rdfc-2019` tenant must NOT set one | no                         | no       |
+| `TENANT_KEY_PUBLIC_{TENANT_NAME}`  | public multibase half of an `ecdsa-rdfc-2019` tenant's P-256 key — see [ecdsa-rdfc-2019 key material](#ecdsa-rdfc-2019-key-material) |                            | no       |
+| `TENANT_KEY_SECRET_{TENANT_NAME}`  | secret multibase half of the same key. Both halves or neither                                                       |                            | no       |
 | `TENANT_DIDMETHOD_{TENANT_NAME}`   | did method (`key` or `web`) to use for signing on this tenant                                                       | `key`                      | no       |
 | `TENANT_DID_URL_{TENANT_NAME}`     | url to use for did:web                                                                                              |                            | no       |
-| `TENANT_CRYPTOSUITE_{TENANT_NAME}` | cryptosuite to use (`eddsa-rdfc-2022` for DataIntegrityProof, omit for Ed25519Signature2020)                        | `Ed25519Signature2020`     | no       |
+| `TENANT_CRYPTOSUITE_{TENANT_NAME}` | cryptosuite to use (`eddsa-rdfc-2022` or `ecdsa-rdfc-2019` for DataIntegrityProof, omit for Ed25519Signature2020)    | `Ed25519Signature2020`     | no       |
 | `TENANT_AUTH_TOKEN_{TENANT_NAME}`  | Secret for Bearer (`Authorization: Bearer …`) or Basic Auth password on `/credentials/issue`. Each token must be unique if you use Bearer. See [VCALM endpoint](#vcalm-issue-endpoint) |                            | no       |
 | `ENABLE_ACCESS_LOGGING`            | log all http calls to the service - see [Logging](#logging)                                                         | true                       | no       |
 | `ERROR_LOG_FILE`                   | log file for all errors - see [Logging](#logging)                                                                   | no                         | no       |
@@ -125,6 +136,52 @@ So, if you wanted to set up two tenants, one for degrees and one for completion 
 TENANT_SEED_DEGREES=z1AoLPRWHSKasPH1unbY1A6ZFF2Pdzzp7D2CkpK6YYYdKTN
 TENANT_SEED_ECON101=Z1genK82erz1AoLPRWHSKZFF2Pdzzp7D2CkpK6YYYdKTNat
 ```
+
+
+**Use a fixed seed for any tenant whose identity must be stable.** Setting a
+seed to `generate` mints a fresh key on every service start, so the tenant's
+issuer DID silently changes across restarts. Credentials issued either side of
+a restart then carry different issuers — harmless for verification, since
+`did:key` is self-describing, but confusing for anything that correlates
+credentials to an issuer over time (evaluation runs, status lists, audit
+trails). Generate a seed once via `/did-key-generator` and pin it. (An
+`ecdsa-rdfc-2019` tenant has no seed to pin — see
+[ecdsa-rdfc-2019 key material](#ecdsa-rdfc-2019-key-material).)
+
+**Supported cryptosuites** (`TENANT_CRYPTOSUITE_{TENANT_NAME}`):
+
+| Value | Proof | DID methods |
+| --- | --- | --- |
+| *(unset)* | `Ed25519Signature2020` (legacy default) | `did:key`, `did:web` |
+| `eddsa-rdfc-2022` | `DataIntegrityProof` | `did:key`, `did:web` |
+| `ecdsa-rdfc-2019` | `DataIntegrityProof`, P-256 | **`did:key` only** — see below |
+
+`ecdsa-rdfc-2019` is refused for `did:web`. The did:web driver composes a DID
+document whose `@context` is hardcoded to the Ed25519/X25519 suite contexts and
+emits no verification method for an ECDSA key, so publishing a P-256 key there
+would misdescribe it to every relying party. Supporting it means composing the
+DID document ourselves or replacing the resolver.
+
+**An `ecdsa-rdfc-2019` tenant is configured differently from every other
+tenant: it carries no seed.** P-256 key material cannot be derived from a seed
+in this stack, so it is minted once and both multibase halves are persisted:
+
+```
+TENANT_CRYPTOSUITE_LEDGERLAB=ecdsa-rdfc-2019
+TENANT_KEY_PUBLIC_LEDGERLAB=zDna…
+TENANT_KEY_SECRET_LEDGERLAB=z42t…
+```
+
+See [ecdsa-rdfc-2019 key material](#ecdsa-rdfc-2019-key-material) for how to
+mint them. **Four declarations are refused at startup**, naming the tenant,
+rather than falling back to anything:
+
+| Declaration | Why it is refused |
+| --- | --- |
+| `ecdsa-rdfc-2019` with only a `TENANT_SEED_` | The P-256 generator discards its seed, so the seed pins nothing and the tenant's DID would change on every restart |
+| Both a `TENANT_SEED_` and key material | Nothing can decide which is authoritative |
+| `TENANT_KEY_PUBLIC_` without `TENANT_KEY_SECRET_`, or the reverse | Half a key pair cannot sign, and the missing half cannot be derived from the one present |
+| Key material on a tenant that is not `ecdsa-rdfc-2019` | No other suite consumes multibase halves |
 
 For the legacy sign endpoint, tenant names appear in the URL:
 
@@ -300,23 +357,30 @@ So, that curl command will return a document something like so:
     "didDocument": {
         "@context": [
             "https://www.w3.org/ns/did/v1",
-            "https://w3id.org/security/suites/ed25519-2020/v1",
-            "https://w3id.org/security/suites/x25519-2020/v1"
+            "https://w3id.org/security/suites/ed25519-2020/v1"
         ],
         "id": "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main",
-        "assertionMethod": [
+        "verificationMethod": [
             {
                 "id": "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main#z6MkfGZKFTyxiH9HgFUHbPQigEWh8PtFaRkESt9oQLiTvhVq",
                 "type": "Ed25519VerificationKey2020",
                 "controller": "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main",
                 "publicKeyMultibase": "z6MkfGZKFTyxiH9HgFUHbPQigEWh8PtFaRkESt9oQLiTvhVq"
             }
+        ],
+        "assertionMethod": [
+            "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main#z6MkfGZKFTyxiH9HgFUHbPQigEWh8PtFaRkESt9oQLiTvhVq"
+        ],
+        "authentication": [
+            "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main#z6MkfGZKFTyxiH9HgFUHbPQigEWh8PtFaRkESt9oQLiTvhVq"
         ]
     }
 }
 ```
 
 </details>
+
+The generator has no tenant, so it has no configured cryptosuite: it previews the **default** suite's shape (`Ed25519VerificationKey2020`). A tenant configured with `TENANT_CRYPTOSUITE_{TENANT_NAME}=eddsa-rdfc-2022` publishes the same key with type `Multikey` — see [the published shape](#the-published-shape). The key and the `#fragment` are identical either way.
 
 Again, as with a did:key, you'll need to set the `seed` and register the `did`, as described in the prior [did:key generator](#didkey-generator) section.
 
@@ -326,22 +390,31 @@ You will additionally need to copy the value of the didDocument property, i.e, f
 {
   "@context": [
     "https://www.w3.org/ns/did/v1",
-    "https://w3id.org/security/suites/ed25519-2020/v1",
-    "https://w3id.org/security/suites/x25519-2020/v1"
+    "https://w3id.org/security/suites/ed25519-2020/v1"
   ],
   "id": "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main",
-  "assertionMethod": [
+  "verificationMethod": [
     {
       "id": "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main#z6MkfGZKFTyxiH9HgFUHbPQigEWh8PtFaRkESt9oQLiTvhVq",
       "type": "Ed25519VerificationKey2020",
       "controller": "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main",
       "publicKeyMultibase": "z6MkfGZKFTyxiH9HgFUHbPQigEWh8PtFaRkESt9oQLiTvhVq"
     }
+  ],
+  "assertionMethod": [
+    "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main#z6MkfGZKFTyxiH9HgFUHbPQigEWh8PtFaRkESt9oQLiTvhVq"
+  ],
+  "authentication": [
+    "did:web:raw.githubusercontent.com:jchartrand:didWebTest:main#z6MkfGZKFTyxiH9HgFUHbPQigEWh8PtFaRkESt9oQLiTvhVq"
   ]
 }
 ```
 
-and save that in a file called did.json at the url where you'll host the document. So for our example at:
+If you hand-copy this for an external host, copy it for the suite that tenant is configured with — a hand-copied document is exactly the thing that drifts.
+
+**Prefer [`GET /instance/:instanceId/did.json`](#publishing-the-did-document) over copying the document by hand.** Copying is only necessary when the DID's host is somewhere this service cannot be reached from, such as a GitHub Pages repository. Every copy is a value that can drift from the seed it came from, and one of ours did.
+
+If you do need the copy, save the `didDocument` above in a file called did.json at the url where you'll host the document. So for our example at:
 
 `https://raw.githubusercontent.com/jchartrand/didWebTest/main/.well-known/did.json`
 
@@ -352,6 +425,35 @@ You must also set the `TENANT_DIDMETHOD_{TENANT_NAME}=web` environment variable 
 #### random tenant key
 
 NOTE: there is also an option to set the seed value for a tenant to `generate`. The system will generate a random did:key for any tenants so configured. This is really only useful for testing and experimenting since the keys are lost on restart, and the associated [DID](https://www.w3.org/TR/did-core/) for each is not registered in any public registry.
+
+#### ecdsa-rdfc-2019 key material
+
+`ecdsa-rdfc-2019` tenants do **not** use a seed, and there is no generator
+endpoint for them. `@digitalbazaar/ecdsa-multikey`'s `generate()` accepts no
+seed argument — it silently ignores one — and its raw-import path cannot
+recompute a P-256 public key from the secret, so the material is minted once
+and **both multibase halves are persisted**. Minting at start-up is exactly the
+failure this replaces: a key minted when the process starts is a key that
+changes when the process restarts.
+
+Mint a tenant's material with:
+
+```
+npm run mint:ecdsa -- --tenant LEDGERLAB
+```
+
+It prints three values, and where each one goes matters:
+
+| Value | Goes to |
+| --- | --- |
+| `publicKeyMultibase` | Your secret store, as `TENANT_KEY_PUBLIC_{TENANT_NAME}` |
+| `secretKeyMultibase` | Your secret store, as `TENANT_KEY_SECRET_{TENANT_NAME}`. Never into git, a ticket or a chat message |
+| `did:key` | Publishable, and the value any consumer advertising this tenant's issuer identity needs |
+
+The key cannot be regenerated: losing the secret half means a new DID for that
+tenant. Run `npm run mint:ecdsa -- --help` for the full notes, and see
+[`docs/adr/2026-09-10-ecdsa-key-material-both-multibase-halves.md`](docs/adr/2026-09-10-ecdsa-key-material-both-multibase-halves.md)
+for why it is shaped this way.
 
 ### DID Registries
 
@@ -367,7 +469,93 @@ The issuer is by default set up to use the did:key implemenation of a [DID](http
 
 The did:web implementation is preferable for production becuase it allows you to rotate (change) your signing keys whithout having to update every document that points at the old keys.
 
-To use it set `TENANT_DIDMETHOD_{TENANT_NAME}=web` and set `TENANT_DID_URL_{TENANT_NAME}` to the url where your `.well-known/did.json` did-document is hosted.
+#### Configuring a did:web tenant
+
+Three environment variables, all per-tenant, all optional in general and all required together for did:web:
+
+```
+TENANT_SEED_CCP-D1=z1AeiPT496wWmo9BG2QYXeTusgFSZPNG3T9wNeTtjrQ3rCB
+TENANT_DIDMETHOD_CCP-D1=web
+TENANT_DID_URL_CCP-D1=https://lit-exchanges.ngrok.io/ui/ccp-d1
+TENANT_CRYPTOSUITE_CCP-D1=eddsa-rdfc-2022
+```
+
+| Variable | Effect |
+| --- | --- |
+| `TENANT_DIDMETHOD_{TENANT_NAME}` | `web` selects did:web for this tenant. Anything else (including unset) means `key`. |
+| `TENANT_DID_URL_{TENANT_NAME}` | The URL the DID document is published at, **without** the trailing `/did.json`. Determines the DID: the URL above yields `did:web:lit-exchanges.ngrok.io:ui:ccp-d1`. |
+| `TENANT_CRYPTOSUITE_{TENANT_NAME}` | `eddsa-rdfc-2022` for a `DataIntegrityProof`; omit for the legacy `Ed25519Signature2020`. `ecdsa-rdfc-2019` is **not** available with did:web — see below. For did:web this also selects the **verification method type in the published document** — see [the published shape](#the-published-shape). |
+
+These have always been read (`src/config.js`), but they were thinly documented, and that is how the incident in the next section happened. Both `Ed25519Signature2020` and `eddsa-rdfc-2022` work with did:web.
+
+#### Publishing the DID document
+
+A did:web DID only resolves if a document is served at the identifier's own URL — for the tenant above, `https://lit-exchanges.ngrok.io/ui/ccp-d1/did.json`.
+
+**Do not hand-copy the document there.** The [did:web generator](#didweb-generator) section describes copying the `didDocument` property into a file, which works and is what an external host like GitHub Pages needs, but it produces a hand-maintained copy of a value that is otherwise derived. We shipped exactly that copy once, it drifted from the configured seed, and the published issuer identifier and the actual signing key disagreed for an entire milestone because nothing ever compared them.
+
+So this service publishes the real thing:
+
+```
+GET /instance/:instanceId/did.json
+```
+
+```
+curl localhost:4006/instance/ccp-d1/did.json
+```
+
+- The document is **derived on every request** from the same seed and URL, through the same driver call, that produce the signing key. There is no stored copy and no way to override it, so "issuer says one thing, key says another" cannot be represented.
+- **No authentication.** A DID document is public by definition and carries only public key material.
+- **404 for a `did:key` tenant** (nothing to host) or an unknown tenant. The tenant name is already in the URL the caller constructed, so the two are not distinguished.
+- Returns a plain DID document with `Content-Type: application/json` — no envelope, because the caller is a DID resolver.
+
+##### The published shape
+
+```json
+{
+  "@context": [
+    "https://www.w3.org/ns/did/v1",
+    "https://w3id.org/security/multikey/v1"
+  ],
+  "id": "did:web:lit-exchanges.ngrok.io:ui:ccp-d1",
+  "verificationMethod": [
+    {
+      "id": "did:web:lit-exchanges.ngrok.io:ui:ccp-d1#z6MkfZN9…",
+      "type": "Multikey",
+      "controller": "did:web:lit-exchanges.ngrok.io:ui:ccp-d1",
+      "publicKeyMultibase": "z6MkfZN9…"
+    }
+  ],
+  "assertionMethod": ["did:web:lit-exchanges.ngrok.io:ui:ccp-d1#z6MkfZN9…"],
+  "authentication": ["did:web:lit-exchanges.ngrok.io:ui:ccp-d1#z6MkfZN9…"]
+}
+```
+
+The verification method's `type` and the second `@context` entry follow the tenant's `TENANT_CRYPTOSUITE_{TENANT_NAME}`, because the document has to describe the key the way the proof will reference it:
+
+| `TENANT_CRYPTOSUITE_{TENANT_NAME}` | Verification method `type` | Second `@context` entry |
+| --- | --- | --- |
+| *(unset)* / `Ed25519Signature2020` | `Ed25519VerificationKey2020` | `https://w3id.org/security/suites/ed25519-2020/v1` |
+| `eddsa-rdfc-2022` | `Multikey` | `https://w3id.org/security/multikey/v1` |
+| `ecdsa-rdfc-2019` | — | refused, [see below](#ecdsa-rdfc-2019-is-didkey-only) |
+
+**The key, the `#fragment` and the DID do not change with the suite** — only the type and the context do. An already-issued credential's `proof.verificationMethod` keeps pointing at the published method.
+
+**This shape is normalised from the driver's output, not composed.** `@interop/did-web-resolver@5.0.0` returns a document that embeds the whole method inside `assertionMethod`, emits no top-level `verificationMethod` array, and declares an x25519 context it never backs with a `keyAgreement` key. That form is legal — DID Core §5.3.1 allows an embedded method — but a third-party wallet is entitled to reject it, and this service is used to test wallets, so a wallet's failure has to be the wallet's fault. `src/didWeb.js` therefore **moves** the method the driver produced into `verificationMethod`, references it by fragment from `assertionMethod` and `authentication`, drops the unused x25519 context, and substitutes the suite's `type`. It never builds a method out of separately-held key material: a document composed beside the signing path is the drift this endpoint exists to prevent. If the driver's output shape ever changes, the normaliser throws a 500 rather than serving a document with no key in it. See [`docs/adr/2026-08-11-did-web-document-normalisation.md`](docs/adr/2026-08-11-did-web-document-normalisation.md).
+
+Anything asserting on the published document should read `verificationMethod[0]`.
+
+If the host that answers on the DID's domain is not this service — it usually is not, since the signing service is normally not public — that host should proxy this endpoint rather than keep a copy. [`dcc-transaction-service`](https://github.com/skybridgeskills/dcc-transaction-service) does exactly this for the tunnelled host, deriving the path and the signing tenant from its own issuer-instance configuration.
+
+#### ecdsa-rdfc-2019 is did:key only
+
+`TENANT_CRYPTOSUITE_{TENANT_NAME}=ecdsa-rdfc-2019` together with `TENANT_DIDMETHOD_{TENANT_NAME}=web` is **refused**, both when signing and when publishing, with:
+
+> ecdsa-rdfc-2019 is supported for did:key only. The did:web driver cannot express a P-256 verification method, and issuing one would publish a DID document that misdescribes the key.
+
+This is deliberate, not a gap. The did:web driver composes a document whose `@context` is hardcoded to the Ed25519 and X25519 suite contexts — no Multikey, no data-integrity context — and it emits no verification method for an ECDSA key at all. Publishing a P-256 key inside that document would look fine here and fail, or worse verify ambiguously, at a relying party. Supporting it means composing the document ourselves or replacing the resolver. `ecdsa-rdfc-2019` with did:key works.
+
+Note that the normalisation described above does **not** open this door. It re-expresses a method the driver actually produced; for an `ecdsa-rdfc-2019` tenant the driver still produces an *Ed25519* key, so restyling the document would publish a key the tenant never signs with — the same mis-issuance, wearing a better-shaped document. Publication is refused before a suite is even selected.
 
 ## Usage
 
@@ -394,6 +582,58 @@ where the `.env` file contains your environment variables. See [.env.example](./
 See how we do that in the [DCC issuer-coordinator](https://github.com/digitalcredentials/issuer-coordinator)
 
 Note that to run this with Docker, you'll of course need to install Docker, which is very easy with the [Docker installers for Windows, Mac, and Linux](https://docs.docker.com/engine/install/).
+
+### Sign an OID4VP request object
+
+```
+POST /instance/:instanceId/openid4vp/request-object/sign
+```
+
+⚠️ **This service signs something that is not a credential, and that is
+deliberate.** OID4VP §5.9.3's `decentralized_identifier` Client Identifier
+Prefix identifies a verifier by a DID, and the JOSE `kid` in its signed request
+object must name a key in that DID document's `verificationMethod`. **This
+service is the only component that derives both the published document and the
+signing key from one seed** — `didWeb.js` exists for precisely that invariant.
+Holding the key anywhere else would put the document and the key in different
+processes with nothing comparing them, which is [gap H1](#didweb) with a network
+in the middle.
+
+The body is the request object's claims; the response is a compact JWS served as
+`application/oauth-authz-req+jwt`, unwrapped, so the caller can serve those bytes
+verbatim at its `request_uri`.
+
+```
+curl --location 'http://localhost:4006/instance/test/openid4vp/request-object/sign' --header 'Content-Type: application/json' --data-raw '{"response_type":"vp_token","response_mode":"direct_post","client_id":"decentralized_identifier:did:web:example.com","nonce":"n","state":"s"}'
+```
+
+**What it signs with:** the tenant's existing seed. No new keys, no new tenants,
+no new DIDs. ⚠️ The DID is an **entity identity, not a role identity** — some
+organisations verify only, some issue only, and this service signs on behalf of
+the entity whatever it happens to be acting as. Do not let documentation call it
+"the issuer DID" in a verifier context.
+
+**The `kid`** is read from the tenant's published `did.json`, never composed from
+`did + '#' + something`. A composed `kid` would be a second statement about which
+key signs.
+
+⚠️ **The algorithm is EdDSA and it is forced, not chosen.** See
+[`ecdsa-rdfc-2019` is did:key only](#ecdsa-rdfc-2019-is-didkey-only): the
+`did:web` driver cannot express a P-256 verification method, so an ECDSA
+`did:web` tenant is refused here with the same shared message the signing and
+publication paths use. **ES256 is the de-facto default for OID4VP request-object
+signing in the mDL/EUDI world**, so a conformant signed arm may prove less
+interoperable than an unsigned one — that is a thing to measure, and no P-256
+path was added to pre-empt it.
+
+**Refusals are named, and there is no unsigned fallback.** An unknown tenant, a
+`did:key` tenant (it publishes no document at a URL), a refused suite, or an
+empty body each return a named error. ⚠️ An unsigned result from a *sign*
+endpoint would look like success, and the verifier separately serves a genuinely
+unsigned `alg: none` request object as a registered accommodation — the two must
+never be confusable.
+
+See [the ADR](docs/adr/2026-08-25-oid4vp-request-object-signing.md).
 
 ### Sign a credential
 
@@ -525,10 +765,14 @@ The service also supports the VCALM (Verifiable Credentials API for Learner Reco
 
 This endpoint follows the VCALM specification for issuing credentials. The tenant is **not** in the URL; it is determined from `Authorization`.
 
-**Authentication (required):**
+**Authentication:**
 
-- **Basic Auth**: `Authorization: Basic <base64(username:password)>` where `username` is the tenant name (same as the legacy path segment, case-insensitive). If `TENANT_AUTH_TOKEN_{TENANT_NAME}` is set, `password` must match it; if not set, any password is accepted once the tenant exists.
-- **Bearer Token**: `Authorization: Bearer <token>` where `<token>` equals that tenant's `TENANT_AUTH_TOKEN_{TENANT_NAME}`. The service maps the token to a tenant internally; **use a distinct token per tenant.**
+An `Authorization` header is always required. Whether a valid secret is required depends on the tenant:
+
+- **Basic Auth**: `Authorization: Basic <base64(username:password)>` where `username` is the tenant name (same as the legacy path segment, case-insensitive). If `TENANT_AUTH_TOKEN_{TENANT_NAME}` is set, `password` must match it exactly. If it is **not** set, the tenant is **open** on `/credentials/issue`: **any** password is accepted once the tenant name matches. This tokenless mode is intentional (it preserves frictionless local/dev use), so setting a token is what actually gates a tenant behind authentication. The three default tenants (`test`, `testing`, `random`) ship without tokens and are therefore open. On config load, the service logs a consolidated `[auth]` warning listing every tokenless (open) tenant.
+- **Bearer Token**: `Authorization: Bearer <token>` where `<token>` equals that tenant's `TENANT_AUTH_TOKEN_{TENANT_NAME}`. The service maps the token to a tenant internally; **use a distinct token per tenant.** If two tenants share a token, only one wins the reverse lookup and the service logs an `[auth]` warning at config load.
+
+See the [tokenless-auth-policy ADR](docs/adr/2026-07-06-credentials-issue-tokenless-auth-policy.md) for the rationale behind keeping tokenless tenants open rather than fail-closed.
 
 **Headers:**
 
