@@ -113,6 +113,7 @@ There is a sample .env file provided called .env.example to help you get started
 | `CONSOLE_LOG_LEVEL`                | console log level - see [Logging](#logging)                                                                         | silly                      | no       |
 | `LOG_LEVEL`                        | log level for application - see [Logging](#logging)                                                                 | silly                      | no       |
 | `HEALTH_CHECK_SMTP_HOST`           | SMTP host for unhealthy notification emails - see [Health Check](#health-check)                                     | no                         | no       |
+| `HEALTH_CHECK_SMTP_PORT`           | SMTP port for unhealthy notification emails - see [Health Check](#health-check)                                     | no                         | no       |
 | `HEALTH_CHECK_SMTP_USER`           | SMTP user for unhealthy notification emails - see [Health Check](#health-check)                                     | no                         | no       |
 | `HEALTH_CHECK_SMTP_PASS`           | SMTP password for unhealthy notification emails - see [Health Check](#health-check)                                 | no                         | no       |
 | `HEALTH_CHECK_EMAIL_FROM`          | name of email sender for unhealthy notifications emails - see [Health Check](#health-check)                         | no                         | no       |
