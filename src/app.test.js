@@ -18,8 +18,10 @@ import {
   getUnsignedVC,
   getUnsignedVCWithStatus,
   getUnsignedVC2WithStatus,
-  getUnsignedVCWithoutSuiteContext
+  getUnsignedVCWithoutSuiteContext,
+  getUnsignedIdentificationDocument
 } from './test-fixtures/vc.js'
+import { withFetchBlocked } from './test-fixtures/network.js'
 
 import { build } from './app.js'
 
@@ -28,6 +30,15 @@ didKeyDriver.use({
   multibaseMultikeyHeader: 'z6Mk',
   fromMultibase: Ed25519VerificationKey2020.from
 })
+
+// A context URL no loader can serve — neither bundled nor pinned.
+const UNSERVABLE_CONTEXT = 'https://example.com/not-a-real-context/v1'
+
+const getCredentialWithUnservableContext = () => {
+  const credential = getUnsignedIdentificationDocument()
+  credential['@context'].push(UNSERVABLE_CONTEXT)
+  return credential
+}
 
 let testDIDSeed
 let didDocument
@@ -168,6 +179,36 @@ describe('api', () => {
       expect(response.status).to.eql(200)
       expect(response.body.credentialStatus).to.eql(statusBeforeSigning)
     })
+
+    // The identification_document_v1rc1 regression: its second context is not
+    // in the loader's bundled set, and before `src/contexts/` pinned it every
+    // such credential failed in canonization with jsonld.InvalidUrl.
+    it('signs an identification document credential, with the network blocked', async () => {
+      const sentCred = getUnsignedIdentificationDocument()
+      let response
+      const attempts = await withFetchBlocked(async () => {
+        response = await request(app)
+          .post('/instance/testing/credentials/sign')
+          .send(sentCred)
+      })
+
+      expect(attempts).to.eql([])
+      expect(response.status).to.eql(200)
+      expect(response.body.id).to.eql(sentCred.id)
+      expect(response.body.type).to.eql(sentCred.type)
+      expect(response.body.proof.type).to.eql('Ed25519Signature2020')
+      expect(response.body.proof.verificationMethod).to.eql(verificationMethod)
+    })
+
+    it('refuses a credential whose context it cannot serve, naming the URL', async () => {
+      const response = await request(app)
+        .post('/instance/testing/credentials/sign')
+        .send(getCredentialWithUnservableContext())
+
+      // The URL is the contract; the prose around it will be reworded.
+      expect(response.status).to.eql(400)
+      expect(response.body.message).to.have.string(UNSERVABLE_CONTEXT)
+    })
   })
 
   describe('POST /credentials/issue (VCALM)', () => {
@@ -215,6 +256,16 @@ describe('api', () => {
       expect(response.header['content-type']).to.have.string('json')
       expect(response.status).to.eql(200)
       expect(response.body.proof.type).to.eql('Ed25519Signature2020')
+    })
+
+    it('refuses a credential whose context it cannot serve, naming the URL', async () => {
+      const response = await request(app)
+        .post(issuePath)
+        .set('Authorization', `Bearer ${testToken}`)
+        .send({ credential: getCredentialWithUnservableContext() })
+
+      expect(response.status).to.eql(400)
+      expect(response.body.message).to.have.string(UNSERVABLE_CONTEXT)
     })
 
     it('returns 404 when Basic username is an unknown tenant', async () => {
@@ -329,6 +380,21 @@ describe('api', () => {
           (ctx) => ctx === dataIntegrityContext
         )
         expect(occurrences).to.have.lengthOf(1)
+      })
+
+      // The probe runs after `injectContexts`, so it also checks the
+      // data-integrity context this suite adds — and must not refuse it.
+      it('issues a DataIntegrityProof for an identification document credential', async () => {
+        const credentials = Buffer.from(`${diTenant}:any`).toString('base64')
+        const response = await request(app)
+          .post(issuePath)
+          .set('Authorization', `Basic ${credentials}`)
+          .send({ credential: getUnsignedIdentificationDocument() })
+
+        expect(response.status).to.eql(200)
+        expect(response.body['@context']).to.include(dataIntegrityContext)
+        expect(response.body.proof.type).to.eql('DataIntegrityProof')
+        expect(response.body.proof.cryptosuite).to.eql('eddsa-rdfc-2022')
       })
     })
 

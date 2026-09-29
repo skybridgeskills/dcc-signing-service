@@ -38,6 +38,42 @@ const usignedVCv2 = {
     name: 'Jane Doe'
   }
 }
+// The exact shape `identification-document-v1rc1-credential.ts` in
+// skybridgeskills-monorepo emits for the `identification_document_v1rc1`
+// profile — the first credential this service signed under a context outside
+// the loader's bundled set, and the one that failed with jsonld.InvalidUrl
+// until `src/contexts/` pinned it. Keep it faithful to that file: the type is
+// `IdentificationDocumentCredential`, the field is `documentIdentifier`, and
+// `validUntil` appears twice (a datetime at the top, a bare date inside the
+// document). The claim values are placeholders.
+const unsignedIdentificationDocument = {
+  '@context': [
+    'https://www.w3.org/ns/credentials/v2',
+    'https://w3id.org/identification/v1rc1'
+  ],
+  id: 'urn:uuid:6b1c2a9e-3f4d-4c8b-9a2e-1d5f7e8c0b3a',
+  type: ['VerifiableCredential', 'IdentificationDocumentCredential'],
+  issuer: {
+    id: 'did:key:z6MkhVTX9BF3NGYX6cc7jWpbNnR7cAjH8LUffabZP8Qu4ysC',
+    name: 'Test Issuer'
+  },
+  validFrom: '2026-09-29T00:00:00Z',
+  validUntil: '2027-09-29T23:59:59Z',
+  credentialSubject: {
+    type: 'Person',
+    givenName: 'Jane',
+    familyName: 'Doe',
+    birthDate: '1990-01-01',
+    email: 'jane@example.com',
+    identificationDocument: {
+      type: 'IdentificationDocument',
+      name: 'Staff ID',
+      documentIdentifier: 'ABC-123',
+      validUntil: '2027-09-29'
+    }
+  }
+}
+
 const unsignedVC = {
   '@context': [
     'https://www.w3.org/2018/credentials/v1',
@@ -102,6 +138,9 @@ const getUnsignedVC = () => JSON.parse(JSON.stringify(unsignedVC))
 
 const getUnsignedVCv2 = () => JSON.parse(JSON.stringify(usignedVCv2))
 
+const getUnsignedIdentificationDocument = () =>
+  JSON.parse(JSON.stringify(unsignedIdentificationDocument))
+
 const getUnsignedVCWithoutSuiteContext = () => {
   const vcCopy = JSON.parse(JSON.stringify(unsignedVC))
   const index = vcCopy['@context'].indexOf(ed25519_2020suiteContext)
@@ -136,5 +175,6 @@ export {
   getCredentialStatusBitString,
   getUnsignedVCWithStatus,
   getUnsignedVC2WithStatus,
+  getUnsignedIdentificationDocument,
   ed25519_2020suiteContext
 }

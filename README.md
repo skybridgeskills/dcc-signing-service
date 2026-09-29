@@ -22,6 +22,9 @@ IMPORTANT NOTE ABOUT VERSIONING: If you are using a Docker Hub image of this rep
       - [The published shape](#the-published-shape)
     - [ecdsa-rdfc-2019 is did:key only](#ecdsa-rdfc-2019-is-didkey-only)
   - [Revocation](#revocation)
+- [JSON-LD contexts](#json-ld-contexts)
+  - [Adding a context](#adding-a-context)
+  - [A context this service cannot serve](#a-context-this-service-cannot-serve)
 - [Usage](#usage)
   - [Sign a credential](#sign-a-credential)
   - [VCALM Issue Endpoint](#vcalm-issue-endpoint)
@@ -557,6 +560,49 @@ If the host that answers on the DID's domain is not this service — it usually 
 This is deliberate, not a gap. The did:web driver composes a document whose `@context` is hardcoded to the Ed25519 and X25519 suite contexts — no Multikey, no data-integrity context — and it emits no verification method for an ECDSA key at all. Publishing a P-256 key inside that document would look fine here and fail, or worse verify ambiguously, at a relying party. Supporting it means composing the document ourselves or replacing the resolver. `ecdsa-rdfc-2019` with did:key works.
 
 Note that the normalisation described above does **not** open this door. It re-expresses a method the driver actually produced; for an `ecdsa-rdfc-2019` tenant the driver still produces an *Ed25519* key, so restyling the document would publish a key the tenant never signs with — the same mis-issuance, wearing a better-shaped document. Publication is refused before a suite is even selected.
+
+## JSON-LD contexts
+
+**Signing resolves every JSON-LD context from memory and makes no network request for one.** The document loader is `securityLoader()` from `@digitalcredentials/security-document-loader` with `fetchRemoteContexts` left off — which does not mean "fetch slowly": the http/https handlers are never registered, so there is no network path at all. A credential can only be signed if every context it carries comes from one of exactly two sources:
+
+1. **The set bundled with `@digitalcredentials/security-document-loader`** (6.0.1):
+   - Verifiable Credentials 1.1 (`https://www.w3.org/2018/credentials/v1`) and 2.0 (`https://www.w3.org/ns/credentials/v2`)
+   - DID core (`https://www.w3.org/ns/did/v1`)
+   - the Ed25519Signature2020 and X25519KeyAgreement2020 suite contexts (`https://w3id.org/security/suites/ed25519-2020/v1`, `…/x25519-2020/v1`)
+   - data integrity (`https://w3id.org/security/data-integrity/v1`, `…/v2`)
+   - the DCC context (`https://w3id.org/dcc/v1`)
+   - Bitstring Status List (`https://www.w3.org/ns/credentials/status/v1`) and Status List 2021 (`https://w3id.org/vc/status-list/2021/v1`)
+   - every published Open Badges v3 context (`https://purl.imsglobal.org/spec/ob/v3p0/context.json`, `context-3.0.1.json` through `context-3.0.3.json`, `extensions.json`, and the beta and JFF plugfest contexts)
+2. **The contexts pinned in [`src/contexts/`](src/contexts/)**, registered on the same loader before it is built:
+   - `https://w3id.org/identification/v1rc1` — for the `identification_document_v1rc1` profile in skybridgeskills-monorepo
+
+Each pinned context is a verbatim copy with its provenance — source URL, resolved URL, sha256 and fetch date — in a header comment. `src/contexts/contexts.test.js` re-fetches the published document and fails if it has drifted from the copy; it **skips** rather than fails when the network is unavailable, so it never turns an upstream outage into a red build.
+
+This is deliberate. An issuer should sign under a small, reviewed, offline set of contexts, so that the bytes a signature covers are the bytes that were reviewed and issuance does not stop when a context's host does. The verification services — `dcc-transaction-service` and `verifier-core` — deliberately do the opposite and fetch contexts remotely, because a verifier must accept credentials from issuers it cannot enumerate in advance. See [`docs/adr/2026-09-29-signing-pins-jsonld-contexts.md`](docs/adr/2026-09-29-signing-pins-jsonld-contexts.md).
+
+### Adding a context
+
+A new credential profile that introduces a context not in either list cannot be signed until the context is pinned here. To pin one:
+
+1. Fetch the document once (`curl -sL -H 'Accept: application/ld+json' <url>`) and record its sha256.
+2. Add it as a module in `src/contexts/`, copying the provenance header from `identification-v1rc1.js`.
+3. List it in `PINNED_CONTEXTS` in `src/contexts/index.js`.
+4. Add it to the tests in `src/contexts/contexts.test.js`, including a drift check.
+
+Do not turn on `fetchRemoteContexts` instead. `jsonld-document-loader` consults statics before any protocol handler, so the two are not additive, and a fetch sends `Cache-Control: no-cache` on every signature.
+
+### A context this service cannot serve
+
+Before canonization, every context the credential carries — including the ones the tenant's cryptosuite injects — is looked up in the loader. The first one that cannot be served is refused with `400`, naming the URL:
+
+```json
+{
+  "code": 400,
+  "message": "An error occurred in the signing-service: Cannot sign: the JSON-LD context https://example.com/not-a-real-context/v1 is not available to this service. Signing resolves contexts locally and never fetches them; pin it in src/contexts/ to sign credentials that use it. See the logs for full details. ..."
+}
+```
+
+This covers both `POST /instance/:instanceId/credentials/sign` and `POST /credentials/issue`. Without it, `jsonld` rethrows the loader's error under a fixed message — *"Dereferencing a URL did not result in a valid JSON-LD object"* — that names no URL, and the URL never reaches the log. That is how the missing identification context first surfaced.
 
 ## Usage
 

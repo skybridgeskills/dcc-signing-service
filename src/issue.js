@@ -5,6 +5,7 @@ import { securityLoader } from '@digitalcredentials/security-document-loader'
 import { getTenantSeed } from './config.js'
 import { didWebDriver, ECDSA_DID_WEB_REFUSAL } from './didWeb.js'
 import SigningException from './SigningException.js'
+import { addPinnedContexts } from './contexts/index.js'
 import { issue as signVC } from '@digitalbazaar/vc'
 import * as EcdsaMultikey from '@digitalbazaar/ecdsa-multikey'
 import selectSuite from './suites/selectSuite.js'
@@ -14,7 +15,15 @@ import {
 } from './keyMaterial.js'
 
 let ISSUER_INSTANCES = {}
-const documentLoader = securityLoader().build()
+
+// The one document loader signing uses. It resolves contexts from memory only:
+// `securityLoader()`'s bundled set plus the contexts pinned in `src/contexts/`.
+// `fetchRemoteContexts` stays off on purpose — signing performs no network
+// request for a context, so the bytes a signature covers are the bytes that
+// were reviewed. See docs/adr/2026-09-29-signing-pins-jsonld-contexts.md
+// before changing this, and add a context to `src/contexts/` rather than
+// turning fetching on.
+const documentLoader = addPinnedContexts(securityLoader()).build()
 
 // DID drivers. `didWebDriver` is shared with `generate.js` and with the
 // `GET /instance/:instanceId/did.json` endpoint — the published document has to
@@ -249,6 +258,64 @@ export async function getSigningMaterial({
   return { didDocument: did.didDocument, key }
 }
 
+/**
+ * Fails loudly, by name, when a credential carries a context this service
+ * cannot serve.
+ *
+ * WHY THIS EXISTS. `jsonld` wraps the document loader's own error in a fixed
+ * message that names no URL and lists four causes, none of which is the real
+ * one (`ContextResolver._fetchContext`, `jsonld/lib/ContextResolver.js:173`).
+ * The URL survives only in the error's `details`, which neither its message
+ * nor its stack carries — and those two are all `errorLogger` writes. That
+ * message reached an operator as
+ * "Dereferencing a URL did not result in a valid JSON-LD object" for
+ * `https://w3id.org/identification/v1rc1` — a context that was reachable,
+ * valid and simply not pinned here — and the URL it wanted was in the error
+ * one frame below.
+ *
+ * This service signs from a closed set of contexts (see `src/contexts/` and
+ * the ADR), so "which URL" is always answerable before canonization starts,
+ * by asking the loader directly rather than relying on the shape of
+ * `jsonld`'s error. It
+ * costs one loader lookup per context per request, all from memory. Only the
+ * top-level `@context` is probed; scoped contexts inside a pinned document are
+ * part of that document and reviewed with it.
+ *
+ * STATUS 400, deliberately. The credential as sent cannot be signed by this
+ * service, and resending it unchanged will fail identically — so not a 5xx,
+ * which tells a caller the fault is transient and worth retrying. 400 matches
+ * the other refusals of a credential's shape (the empty-body guards in
+ * `app.js`, the ecdsa-rdfc-2019 did:web refusal) rather than the 420 that
+ * `addIssuerId` uses, which is not a registered status. The remedy may be ours
+ * (pin the context) rather than the caller's; the message says so.
+ *
+ * @param {object} credential - After `injectContexts`, so the suite's own
+ *   required contexts are probed too.
+ * @param {Function} documentLoader
+ */
+const assertContextsResolvable = async (credential, documentLoader) => {
+  const contexts = Array.isArray(credential['@context'])
+    ? credential['@context']
+    : [credential['@context']]
+  for (const entry of contexts) {
+    // An inline context object is legal and needs no dereference.
+    if (typeof entry !== 'string') continue
+    try {
+      await documentLoader(entry)
+    } catch (e) {
+      // The loader's own error ("Document not found in document loader: <url>")
+      // is kept as the stack, which `errorLogger` writes to the log.
+      throw new SigningException(
+        400,
+        `Cannot sign: the JSON-LD context ${entry} is not available to this ` +
+          `service. Signing resolves contexts locally and never fetches them; ` +
+          `pin it in src/contexts/ to sign credentials that use it.`,
+        e?.stack
+      )
+    }
+  }
+}
+
 export class IssuerInstance {
   constructor({ documentLoader, signingSuite, requiredContexts }) {
     this.documentLoader = documentLoader
@@ -259,6 +326,7 @@ export class IssuerInstance {
     // this library attaches the signature on the original object, so make a copy
     const credCopy = JSON.parse(JSON.stringify(credential))
     injectContexts(credCopy, this.requiredContexts)
+    await assertContextsResolvable(credCopy, this.documentLoader)
     try {
       return signVC({
         credential: credCopy,
