@@ -1,4 +1,4 @@
-# ADR: Signing pins the JSON-LD contexts it will sign under, and refuses an unpinned one by name
+# ADR: Signing pins the JSON-LD contexts it will sign under, carries the final VC 2.0 context, and refuses what it cannot sign by name
 
 **Date:** 2026-09-29
 **Status:** Accepted
@@ -20,7 +20,7 @@ computed:
 The credential's second context is `https://w3id.org/identification/v1rc1`. That URL is
 fine: it redirects once to GitHub Pages and serves valid `application/ld+json`. **The service
 refused to go and get it.** `src/issue.js` built its loader as `securityLoader().build()`, and
-`@digitalcredentials/security-document-loader@6.0.1` defaults `fetchRemoteContexts` to
+`@digitalcredentials/security-document-loader@6.0.x` defaults `fetchRemoteContexts` to
 `false` — in which mode it never registers the http/https protocol handlers. That is not a
 loader with a slow network path; it is a loader with no network path. It serves a fixed
 bundled set: VC 1.1 and 2.0, DID core, the Ed25519/X25519 2020 suites, data integrity, the DCC
@@ -86,10 +86,11 @@ options are not additive, and whatever is pinned is what gets signed over.
 - **`v1rc1` is a release candidate.** When `identification/v1` goes final it is a new URL,
   pinned beside this one, and a new profile version in the monorepo — not an edit to the
   vendored file.
-- **Coverage is asserted by IRI, not by safe mode.** The VC 2.0 context declares an `@vocab`
-  (`…/credentials/issuer-dependent#`), so under it an undefined term is silently mapped rather
-  than dropped, and `jsonld`'s `safe: true` does not catch a misnamed field. The tests assert
-  the IRIs the vendored context must supply and that nothing fell through to that fallback.
+- **Coverage is asserted by IRI as well as by safe mode.** Safe mode catches a misnamed field
+  only because the VC 2.0 context has no `@vocab` — which was not true of the copy this
+  loader bundled before decision 3. The tests assert the IRIs the vendored context must
+  supply and that nothing fell through to an `issuer-dependent#` fallback, so they stay honest
+  either way.
 
 ### Rejected alternatives
 
@@ -154,3 +155,79 @@ unwrapped through `@digitalbazaar/vc`, `jsonld-signatures` and whichever cryptos
 uses, which differ in their `jsonld` versions today. The probe asks the loader directly, which
 is the one component whose behaviour this service owns, and costs only in-memory lookups.
 Logging `details` in `errorLogger` would be worth doing regardless.
+
+## Decision 3 — the loader carries the final VC 2.0 context, and an undefined property is refused by name
+
+**`@digitalcredentials/security-document-loader` moves from 6.0.x to 8.0.0**, and with it the
+bundled `https://www.w3.org/ns/credentials/v2` moves from
+`@digitalcredentials/credentials-v2-context@0.0.1-beta.0` to `1.0.0`.
+
+The 6.0.x copy was a **pre-Recommendation draft**. It differed from the context the W3C
+publishes in two ways. It declared `"@vocab": "https://www.w3.org/ns/credentials/issuer-dependent#"`,
+which the final Recommendation removed (a catch-all `@vocab` now lives only in the examples
+context). And it defined `statusSize`, `statusMessage` and `statusReference` on
+`BitstringStatusList` rather than on `BitstringStatusListEntry`. `1.0.0` is deep-equal to the
+published document; so, in 8.0.0, is every other bundled context served as JSON — seventeen
+compared against their live URLs on 2026-09-29 — except one (below).
+
+**The `@vocab` was not cosmetic.** Under it, a property no context defined was signed as an
+`issuer-dependent#` term. A verifier that loads the published context drops that property
+instead, canonizes different bytes, and fails the signature. Signing under the draft meant
+signing credentials that only verifiers holding the same draft could verify.
+
+**What the upgrade changes, measured rather than assumed.** Every golden fixture in
+`skybridgeskills-monorepo` for the identity-document and Open Badge profiles canonizes to
+byte-identical n-quads under 6.0.0 and 8.0.0, with no `issuer-dependent#` term, and signs under
+both Ed25519Signature2020 and eddsa-rdfc-2022. None of the terms whose definitions moved is
+emitted by any profile. What does change is a credential carrying a property **no context
+defines**: under the draft it signed, and under the final context safe mode refuses it —
+correctly, since a dropped property is in the JSON but not under the signature. Only
+tenant-authored bodies can carry one: `custom_credential_v1` and the Open Badge
+`json_template` mode.
+
+**That refusal names the property.** `jsonld` reports it only as "Safe mode validation
+error.", which reached callers as a 500. `IssuerInstance.issueCredential` now maps a
+`jsonld.ValidationError` to a `SigningException(400)` naming
+`details.event.details.property`, with the original error as the stack. The author's remedy
+is a context that defines the term, or an inline `{ "@vocab": … }`, which the tests prove
+signs. (Doing this required `await`ing `signVC`: the existing `try`/`catch` around a bare
+`return` had never caught an async rejection.)
+
+### Consequences
+
+- **A tenant template with an undefined property that signs today will not sign after this
+  deploys.** That is the intended behaviour of the final context and the reason for the named
+  400, but it is a behaviour change for tenants, not only a dependency bump.
+- **This reads `jsonld`'s error `details`, which decision 2 declined to rely on.** Here there is
+  no loader-side equivalent to ask — finding the dropped property first would mean
+  re-implementing expansion. The tests exercise both `jsonld` majors in the tree (8.3 via
+  Ed25519Signature2020, 9.0 via eddsa-rdfc-2022), and a safe-mode error of an unfamiliar shape
+  degrades to a generic 400 that still names `jsonld`'s event code, not to a crash.
+- **The bundled Open Badges `context-3.0.3.json` still lags the published one** by two
+  top-level terms, `endorsementJwt` and `jti`, which IMS added in place in 2026. No
+  `@digitalcredentials/open-badges-context` release carries them, and no profile emits them,
+  so this is recorded rather than fixed. A badge using either is refused, by name.
+- **The verifiers are split, and this makes the split harmless for new credentials.**
+  Verifiers consult bundled statics before fetching. Upstream `verifier-core` is already on
+  loader 8.0.0; `dcc-transaction-service` verifies with 6.0.1, so under the draft. The two
+  disagree only about a credential carrying an undefined property — and this service no
+  longer signs one. A credential already issued with an `issuer-dependent#` term keeps
+  verifying at `dcc-transaction-service` and fails at `verifier-core` and at any verifier
+  holding the published context, as it already did. Moving `dcc-transaction-service` to 8.x is
+  worth doing and is not done here.
+- **`https://www.w3.org/ns/credentials/examples/v2` is not pinned.** The monorepo's own
+  custom-credential fixtures list it, so such credentials fail today on both loader versions,
+  by name. The W3C intends that context for examples; whether production credentials may use
+  it is a product decision, not this one.
+
+### Rejected alternatives
+
+**Stay on 6.x and fix only the documentation.** Keeps every signature byte-identical, and keeps
+signing undefined properties as terms that no verifier holding the published context can
+check.
+
+**Pin the final VC 2.0 context in `src/contexts/` over the bundled draft.** Statics are
+last-write-wins, so it would work, but it shadows a bundled context with a local one and
+leaves the rest of the 6.x set — including the older Open Badges copies — behind. The loader
+release that already carries the final context is the smaller and more honest change.
+
