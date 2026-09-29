@@ -40,6 +40,16 @@ const getCredentialWithUnservableContext = () => {
   return credential
 }
 
+// A property no context defines. The final VC 2.0 context has no `@vocab`, so
+// this is dropped in canonization and safe mode refuses to sign.
+const UNDEFINED_PROPERTY = 'favouriteColour'
+
+const getCredentialWithUndefinedProperty = () => {
+  const credential = getUnsignedIdentificationDocument()
+  credential.credentialSubject[UNDEFINED_PROPERTY] = 'green'
+  return credential
+}
+
 let testDIDSeed
 let didDocument
 let verificationMethod
@@ -208,6 +218,29 @@ describe('api', () => {
       // The URL is the contract; the prose around it will be reworded.
       expect(response.status).to.eql(400)
       expect(response.body.message).to.have.string(UNSERVABLE_CONTEXT)
+    })
+
+    it('refuses a property no context defines, naming it', async () => {
+      const response = await request(app)
+        .post('/instance/testing/credentials/sign')
+        .send(getCredentialWithUndefinedProperty())
+
+      expect(response.status).to.eql(400)
+      expect(response.body.message).to.have.string(`"${UNDEFINED_PROPERTY}"`)
+    })
+
+    it('signs an undefined property once an inline @vocab defines it', async () => {
+      const sentCred = getCredentialWithUndefinedProperty()
+      sentCred['@context'].push({ '@vocab': 'https://example.com/vocab#' })
+      const response = await request(app)
+        .post('/instance/testing/credentials/sign')
+        .send(sentCred)
+
+      expect(response.status).to.eql(200)
+      expect(response.body.credentialSubject[UNDEFINED_PROPERTY]).to.eql(
+        'green'
+      )
+      expect(response.body.proof.type).to.eql('Ed25519Signature2020')
     })
   })
 
@@ -395,6 +428,19 @@ describe('api', () => {
         expect(response.body['@context']).to.include(dataIntegrityContext)
         expect(response.body.proof.type).to.eql('DataIntegrityProof')
         expect(response.body.proof.cryptosuite).to.eql('eddsa-rdfc-2022')
+      })
+
+      // This suite canonizes with a different `jsonld` major than the legacy
+      // one, so the refusal has to read the same error shape from both.
+      it('refuses a property no context defines, naming it', async () => {
+        const credentials = Buffer.from(`${diTenant}:any`).toString('base64')
+        const response = await request(app)
+          .post(issuePath)
+          .set('Authorization', `Basic ${credentials}`)
+          .send({ credential: getCredentialWithUndefinedProperty() })
+
+        expect(response.status).to.eql(400)
+        expect(response.body.message).to.have.string(`"${UNDEFINED_PROPERTY}"`)
       })
     })
 

@@ -25,6 +25,7 @@ IMPORTANT NOTE ABOUT VERSIONING: If you are using a Docker Hub image of this rep
 - [JSON-LD contexts](#json-ld-contexts)
   - [Adding a context](#adding-a-context)
   - [A context this service cannot serve](#a-context-this-service-cannot-serve)
+  - [A property no context defines](#a-property-no-context-defines)
 - [Usage](#usage)
   - [Sign a credential](#sign-a-credential)
   - [VCALM Issue Endpoint](#vcalm-issue-endpoint)
@@ -565,14 +566,14 @@ Note that the normalisation described above does **not** open this door. It re-e
 
 **Signing resolves every JSON-LD context from memory and makes no network request for one.** The document loader is `securityLoader()` from `@digitalcredentials/security-document-loader` with `fetchRemoteContexts` left off — which does not mean "fetch slowly": the http/https handlers are never registered, so there is no network path at all. A credential can only be signed if every context it carries comes from one of exactly two sources:
 
-1. **The set bundled with `@digitalcredentials/security-document-loader`** (6.0.1):
-   - Verifiable Credentials 1.1 (`https://www.w3.org/2018/credentials/v1`) and 2.0 (`https://www.w3.org/ns/credentials/v2`)
+1. **The set bundled with `@digitalcredentials/security-document-loader`** (8.0.0):
+   - Verifiable Credentials 1.1 (`https://www.w3.org/2018/credentials/v1`) and 2.0 (`https://www.w3.org/ns/credentials/v2`) — the **final Recommendation** context, which has no `@vocab`; see [below](#a-property-no-context-defines)
    - DID core (`https://www.w3.org/ns/did/v1`)
    - the Ed25519Signature2020 and X25519KeyAgreement2020 suite contexts (`https://w3id.org/security/suites/ed25519-2020/v1`, `…/x25519-2020/v1`)
    - data integrity (`https://w3id.org/security/data-integrity/v1`, `…/v2`)
    - the DCC context (`https://w3id.org/dcc/v1`)
    - Bitstring Status List (`https://www.w3.org/ns/credentials/status/v1`) and Status List 2021 (`https://w3id.org/vc/status-list/2021/v1`)
-   - every published Open Badges v3 context (`https://purl.imsglobal.org/spec/ob/v3p0/context.json`, `context-3.0.1.json` through `context-3.0.3.json`, `extensions.json`, and the beta and JFF plugfest contexts)
+   - every published Open Badges v3 context (`https://purl.imsglobal.org/spec/ob/v3p0/context.json`, `context-3.0.1.json` through `context-3.0.3.json`, `extensions.json`, and the beta and JFF plugfest contexts). ⚠️ The bundled `context-3.0.3.json` lags the published one by two top-level terms, `endorsementJwt` and `jti`, which IMS added in place in 2026; no `@digitalcredentials/open-badges-context` release carries them yet, so a badge using either cannot be signed.
 2. **The contexts pinned in [`src/contexts/`](src/contexts/)**, registered on the same loader before it is built:
    - `https://w3id.org/identification/v1rc1` — for the `identification_document_v1rc1` profile in skybridgeskills-monorepo
 
@@ -603,6 +604,19 @@ Before canonization, every context the credential carries — including the ones
 ```
 
 This covers both `POST /instance/:instanceId/credentials/sign` and `POST /credentials/issue`. Without it, `jsonld` rethrows the loader's error under a fixed message — *"Dereferencing a URL did not result in a valid JSON-LD object"* — that names no URL, and the URL never reaches the log. That is how the missing identification context first surfaced.
+
+### A property no context defines
+
+Canonization runs in JSON-LD **safe mode**: a credential is refused if any property would be silently dropped, because a dropped property is in the JSON but not under the signature. A property is dropped when none of the credential's contexts defines it. It is refused with `400`, naming the property:
+
+```json
+{
+  "code": 400,
+  "message": "An error occurred in the signing-service: Cannot sign: the property \"favouriteColour\" is not defined by any of the credential's JSON-LD contexts, so it would not be covered by the signature. Add a context that defines it, or an inline @vocab. See the logs for full details. ..."
+}
+```
+
+**Before loader 8.0.0 this did not happen.** Versions up to 7.x bundled a pre-Recommendation copy of the VC 2.0 context (`@digitalcredentials/credentials-v2-context@0.0.1-beta.0`) that declared `"@vocab": "https://www.w3.org/ns/credentials/issuer-dependent#"`, so every undefined property was quietly signed as an issuer-dependent term — which a verifier using the published context would drop, failing verification. The final context has no `@vocab`. This matters for credentials whose body a tenant authors (a custom credential, an Open Badge `json_template`): every property must be defined by a context the credential lists, or by an inline context such as `{ "@vocab": "https://example.com/vocab#" }`.
 
 ## Usage
 

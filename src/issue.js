@@ -316,6 +316,41 @@ const assertContextsResolvable = async (credential, documentLoader) => {
   }
 }
 
+/**
+ * Turns `jsonld`'s safe-mode failure into a refusal that names what it refused.
+ *
+ * WHY THIS EXISTS. Canonization runs in safe mode, which refuses to sign a
+ * credential any part of which would be silently dropped — correctly, since a
+ * dropped property is in the JSON but not under the signature. Until the
+ * loader carried the final VC 2.0 context, an undefined property was never
+ * dropped: the pre-Recommendation copy declared an `@vocab`
+ * (`…/credentials/issuer-dependent#`) that caught every such term. The final
+ * context has no `@vocab`, so a property no context defines now fails here —
+ * and `jsonld` reports it as a bare "Safe mode validation error." that
+ * reached callers as a 500 naming nothing. The property is in the error's
+ * `details`; this puts it in the message.
+ *
+ * 400, like the context refusal: the credential as sent cannot be signed and
+ * resending it will fail the same way. The author's remedy is to define the
+ * term — a context that defines it, or an inline `{ "@vocab": … }`.
+ *
+ * @param {Error} e - Whatever signing threw.
+ * @returns {SigningException|undefined} The refusal, or undefined when `e` is
+ *   not a safe-mode failure and should propagate unchanged.
+ */
+const safeModeRefusal = (e) => {
+  if (e?.name !== 'jsonld.ValidationError') return undefined
+  const event = e.details?.event
+  const property = event?.details?.property
+  const message = property
+    ? `Cannot sign: the property "${property}" is not defined by any of the ` +
+      `credential's JSON-LD contexts, so it would not be covered by the ` +
+      `signature. Add a context that defines it, or an inline @vocab.`
+    : `Cannot sign: JSON-LD safe mode refused the credential ` +
+      `(${event?.code ?? 'unknown'}: ${event?.message ?? e.message}).`
+  return new SigningException(400, message, e.stack)
+}
+
 export class IssuerInstance {
   constructor({ documentLoader, signingSuite, requiredContexts }) {
     this.documentLoader = documentLoader
@@ -328,13 +363,18 @@ export class IssuerInstance {
     injectContexts(credCopy, this.requiredContexts)
     await assertContextsResolvable(credCopy, this.documentLoader)
     try {
-      return signVC({
+      // `await`, not a bare `return`: without it the rejection bypasses this
+      // catch entirely, which it did until the safe-mode refusal below
+      // needed it.
+      return await signVC({
         credential: credCopy,
         suite: this.signingSuite,
         documentLoader: this.documentLoader,
         ...options
       })
     } catch (e) {
+      const refusal = safeModeRefusal(e)
+      if (refusal) throw refusal
       console.error(e)
       throw e
     }

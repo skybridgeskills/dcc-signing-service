@@ -46,13 +46,14 @@ describe('pinned JSON-LD contexts', () => {
   })
 
   it('covers every term the identification document credential emits', async () => {
-    // `safe: true` alone does NOT prove coverage here. It throws on a dropped
-    // term, but the VC 2.0 context declares an `@vocab`
-    // (`https://www.w3.org/ns/credentials/issuer-dependent#`), so under it an
-    // undefined term is never dropped — it silently becomes an issuer-dependent
-    // IRI and canonizes fine. Checked: a misspelt `documentNumber` passes safe
-    // mode. So this asserts the IRIs the vendored context is supposed to
-    // supply, and that nothing fell through to the `@vocab` fallback.
+    // `safe: true` throws on any term the contexts do not define, which is
+    // what proves the vendored bytes are the right bytes. That holds only with
+    // the final VC 2.0 context: the pre-Recommendation copy this loader
+    // bundled before 8.0.0 declared an `@vocab`
+    // (`https://www.w3.org/ns/credentials/issuer-dependent#`) that silently
+    // caught every undefined term, and a misspelt `documentNumber` passed. The
+    // IRI assertions, and the absence of that fallback, keep this test honest
+    // even if an `@vocab` ever comes back.
     const nquads = await jsonld.toRDF(getUnsignedIdentificationDocument(), {
       format: 'application/n-quads',
       safe: true,
@@ -68,6 +69,18 @@ describe('pinned JSON-LD contexts', () => {
       expect(nquads).to.have.string(`<${iri}>`)
     }
     expect(nquads).to.not.have.string('credentials/issuer-dependent#')
+  })
+
+  it('carries the final VC 2.0 context, with no @vocab fallback', async () => {
+    // `@digitalcredentials/security-document-loader` before 8.0.0 bundled a
+    // pre-Recommendation copy of this context whose `@vocab` mapped every
+    // undefined term to `issuer-dependent#` instead of letting safe mode
+    // refuse it. A signature over that is over terms a verifier using the
+    // published context drops, so it does not verify there.
+    const { document } = await buildLoader()(
+      'https://www.w3.org/ns/credentials/v2'
+    )
+    expect(document['@context']).to.not.have.property('@vocab')
   })
 
   // Drift: the vendored copy must still match what the URL serves. Skips —
